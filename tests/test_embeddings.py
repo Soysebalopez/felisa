@@ -1,7 +1,7 @@
-"""Tests de felisa.core.embeddings.
+"""Tests de felisa.core.embeddings via Cloudflare Workers AI.
 
-Requieren Ollama corriendo en localhost:11434 con `nomic-embed-text` pulled.
-Si Ollama no esta, los tests fallan con mensaje claro.
+Requieren creds `felisa-cf-account-id` y `felisa-cf-token` en Keychain.
+Saltean si falta alguna (modo dev sin creds).
 """
 
 from __future__ import annotations
@@ -9,11 +9,31 @@ from __future__ import annotations
 import pytest
 
 from felisa.core import embeddings
+from felisa.core.config import MissingCredential
 
 
-def test_embed_returns_768_dim() -> None:
+def _have_creds() -> bool:
+    try:
+        from felisa.core.config import (
+            get_cloudflare_account_id,
+            get_cloudflare_token,
+        )
+        get_cloudflare_account_id()
+        get_cloudflare_token()
+        return True
+    except MissingCredential:
+        return False
+
+
+pytestmark = pytest.mark.skipif(
+    not _have_creds(),
+    reason="creds Cloudflare no estan en Keychain (felisa-cf-account-id/felisa-cf-token)",
+)
+
+
+def test_embed_returns_384_dim() -> None:
     vec = embeddings.embed("decision tecnica de prueba para Felisa")
-    assert len(vec) == 768
+    assert len(vec) == 384
     assert all(isinstance(x, float) for x in vec)
 
 

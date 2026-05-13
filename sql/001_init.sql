@@ -18,7 +18,7 @@ create table if not exists memories (
   proyecto text,
   tags text[],
   proyectos_relacionados text[],
-  embedding vector(768),
+  embedding vector(384),
   created_at timestamp default now()
 );
 

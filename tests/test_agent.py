@@ -62,7 +62,7 @@ def test_tool_delete_space_not_empty(test_space: str) -> None:
         contenido="lo bloquea",
         space_id=test_space,
         tipo="global",
-        embedding=[0.0] * 768,
+        embedding=[0.0] * 384,
     )
     raw = agent.execute_tool("delete_space", {"id": test_space})
     data = json.loads(raw)

@@ -16,9 +16,9 @@ Numeradas en el documento de diseño. Cada fase corresponde a un milestone en Li
 
 | Fase | Que hace | Milestone Linear |
 |------|----------|------------------|
-| 1 | Core: daemon + Postgres + `mem` desde terminal | "Fase 1 — Core" |
-| 2 | Agente conversacional `felisa` | pendiente |
-| 3 | MCP custom (FastAPI en Railway) + integracion Claude.ai | pendiente |
+| 1 | Core: daemon + Postgres + `mem` desde terminal | Fase 1 — Core (100%) |
+| 2 | Agente conversacional `felisa` | Fase 2 — Agente conversacional (100%) |
+| 3 | MCP custom (FastAPI en Railway) + integracion Claude.ai | en curso |
 | 4 | Telegram bot + Whisper para voz | pendiente |
 | 5 | Deteccion automatica de patrones | pendiente |
 | 6 | Weekly synthesis con cruce de proyectos | pendiente |
@@ -33,7 +33,7 @@ Numeradas en el documento de diseño. Cada fase corresponde a un milestone en Li
 | Package manager | uv |
 | Build | hatchling |
 | DB | Railway PostgreSQL 18.3 + pgvector 0.8.2 (indice HNSW) |
-| Embeddings | nomic-embed-text via Ollama local (768 dim) |
+| Embeddings | Cloudflare Workers AI `@cf/baai/bge-small-en-v1.5` (384 dim) |
 | LLM estructuracion | Claude API Haiku (anthropic) |
 | MCP custom | FastAPI (deploy Railway) — Fase 3 |
 | Captura voz | Groq Whisper — Fase 4 |
@@ -46,26 +46,30 @@ Numeradas en el documento de diseño. Cada fase corresponde a un milestone en Li
 felisa/
   core/
     config.py          # leer credenciales del Keychain
-    db.py              # conexion + operaciones Postgres
-    embeddings.py      # cliente Ollama
-    structuring.py     # llamada a Haiku
+    db.py              # conexion + operaciones Postgres (memories + spaces CRUD)
+    embeddings.py      # cliente Ollama (nomic-embed-text, 768 dim)
+    structuring.py     # llamada a Haiku para clasificar y limpiar
     pipeline.py        # structure + embed + insert (usado por CLI y daemon)
     queue.py           # ~/.felisa/queue.json para items offline
+    agent.py           # agente conversacional con tool use (Sonnet 4.6)
     models.py          # Memory, Space, SearchHit, StructuredMemory
     prompts/
-      structure.md     # prompt versionado para Haiku
+      structure.md     # prompt para Haiku (estructuracion)
+      agent.md         # prompt para Sonnet (agente)
   cli/
-    mem.py             # comando `mem` (entry point: mem)
-    felisa.py          # comando `felisa` (Fase 2)
+    mem.py             # comando `mem` (captura/buscar/listar/cola)
+    felisa.py          # comando `felisa` (loop + one-shot)
   daemon/
-    main.py            # daemon background (entry point: felisa-daemon)
+    main.py            # daemon background (LaunchAgent)
   mcp/
-    api.py             # FastAPI (Fase 3)
+    server.py          # MCP server con tools (Fase 3 — en curso)
 sql/
-  001_init.sql         # schema spaces + memories + pgvector
+  001_init.sql         # schema spaces + memories + pgvector + HNSW
 scripts/
-  com.felisa.daemon.plist   # LaunchAgent
-tests/
+  com.felisa.daemon.plist
+  install-daemon.sh
+  uninstall-daemon.sh
+tests/                 # 61 tests, todos verde
 ```
 
 ## Credenciales
@@ -78,6 +82,9 @@ Todas en Keychain de macOS. Nunca en `.env`, codigo o variables de entorno.
 | Telegram bot token | `felisa-telegram-token` |
 | Telegram chat ID | `felisa-telegram-chat-id` |
 | Groq API | `felisa-groq-key` |
+| Cloudflare account ID | `felisa-cf-account-id` |
+| Cloudflare API token | `felisa-cf-token` |
+| MCP server bearer token | `felisa-mcp-token` |
 
 Lectura desde Python:
 ```python
@@ -149,6 +156,31 @@ loop cada 60s
 4. Actualizar status del issue en Linear (`In Progress` → `In Review` → `Deployed`)
 5. Comentar en el issue cualquier desviacion del plan o decision relevante
 6. Commit + PR (si aplica) — convencion de Whitebay
+
+## Estado actual
+
+- **Fase 1 completa** (commit `062a268`): captura sincrona con `mem`, daemon corriendo como LaunchAgent retrying la cola offline, 37 tests
+- **Fase 2 completa** (commit `ee90294`): agente `felisa` con tool use sobre 8 tools (CRUD spaces + search/list), 24 tests nuevos
+- **Fase 3 en curso**: MCP server custom para que claude.ai lea memoria automaticamente
+
+Tests totales: 61 pasando. DB en Railway: 3 espacios (global/whitebay/simplistic) + 2 memorias reales.
+
+## Comandos utiles
+
+```bash
+mem "texto"                     # capturar memoria (sincrono ~2s)
+mem buscar "consulta"           # busqueda semantica
+mem listar [--espacio X]        # ultimas 20
+mem cola                        # ver pendientes en cola offline
+
+felisa                          # loop conversacional persistente
+felisa "mensaje"                # one-shot
+felisa-daemon --once            # drenar cola manualmente
+felisa-daemon                   # daemon en foreground (debug)
+
+scripts/install-daemon.sh       # (re)instalar LaunchAgent
+scripts/uninstall-daemon.sh
+```
 
 ## Convenciones
 

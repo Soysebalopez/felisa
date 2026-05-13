@@ -16,7 +16,7 @@ from felisa.core import db
 
 def _random_embedding() -> list[float]:
     rng = random.Random()
-    return [rng.uniform(-1.0, 1.0) for _ in range(768)]
+    return [rng.uniform(-1.0, 1.0) for _ in range(384)]
 
 
 @pytest.fixture

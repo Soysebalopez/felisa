@@ -10,6 +10,7 @@ validate_all() al startup para fallar temprano si falta alguna credencial.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from functools import lru_cache
 from pathlib import Path
@@ -20,12 +21,34 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_ENV_PATH = PROJECT_ROOT / ".env"
 KEYCHAIN_ACCOUNT = "felisa"
 
+# Mapping de slot Keychain → nombre de env var de produccion (Railway).
+# Si el env var esta seteado, se usa; si no, se lee del Keychain.
+_KEYCHAIN_TO_ENV = {
+    "felisa-anthropic-key": "ANTHROPIC_API_KEY",
+    "felisa-telegram-token": "TELEGRAM_TOKEN",
+    "felisa-telegram-chat-id": "TELEGRAM_CHAT_ID",
+    "felisa-groq-key": "GROQ_API_KEY",
+    "felisa-cf-account-id": "CLOUDFLARE_ACCOUNT_ID",
+    "felisa-cf-token": "CLOUDFLARE_API_TOKEN",
+    "felisa-mcp-token": "FELISA_API_TOKEN",
+}
+
 
 class MissingCredential(RuntimeError):
     """La credencial pedida no esta disponible. El mensaje indica como arreglarlo."""
 
 
 def _read_keychain(service: str) -> str:
+    """Lee una credencial. Prioriza env var (produccion) sobre Keychain (local).
+
+    `service` es el slot del Keychain. Si existe `_KEYCHAIN_TO_ENV[service]` en
+    las variables de entorno, se devuelve ese valor. Sino, se lee del Keychain
+    macOS via `security`.
+    """
+    env_var = _KEYCHAIN_TO_ENV.get(service)
+    if env_var and os.environ.get(env_var, "").strip():
+        return os.environ[env_var].strip()
+
     try:
         result = subprocess.run(
             [
@@ -40,14 +63,19 @@ def _read_keychain(service: str) -> str:
             check=True,
         )
     except subprocess.CalledProcessError as exc:
+        env_hint = f" (o env var {env_var})" if env_var else ""
         raise MissingCredential(
-            f"No se encontro '{service}' en Keychain. "
-            f"Guardala con:\n  "
+            f"No se encontro '{service}'{env_hint}. "
+            f"Para macOS:\n  "
             f"security add-generic-password -s '{service}' -a '{KEYCHAIN_ACCOUNT}' -w"
         ) from exc
     except FileNotFoundError as exc:
+        if env_var:
+            raise MissingCredential(
+                f"En este entorno no hay Keychain. Seteá la env var {env_var}."
+            ) from exc
         raise MissingCredential(
-            "El binario 'security' no esta disponible. Felisa requiere macOS."
+            f"El binario 'security' no esta y no hay env var fallback para '{service}'."
         ) from exc
     return result.stdout.strip()
 
@@ -73,12 +101,28 @@ def get_groq_key() -> str:
 
 
 @lru_cache(maxsize=1)
+def get_cloudflare_account_id() -> str:
+    return _read_keychain("felisa-cf-account-id")
+
+
+@lru_cache(maxsize=1)
+def get_cloudflare_token() -> str:
+    return _read_keychain("felisa-cf-token")
+
+
+@lru_cache(maxsize=1)
 def get_database_url(env_path: Path | None = None) -> str:
+    # Prioridad: env var directa (Railway, CI)
+    env_url = os.environ.get("DATABASE_URL", "").strip()
+    if env_url:
+        return env_url
+
+    # Fallback: .env local
     path = env_path or DEFAULT_ENV_PATH
     if not path.exists():
         raise MissingCredential(
-            f"No existe {path}. Crealo con DATABASE_URL=postgresql://...\n  "
-            f"railway variables --service Postgres --json | "
+            f"No existe DATABASE_URL en env, ni {path}. "
+            f"Para dev local: railway variables --service Postgres --json | "
             f"python3 -c \"import json,sys; "
             f"print('DATABASE_URL=' + json.load(sys.stdin)['DATABASE_PUBLIC_URL'])\" "
             f"> {path}"
@@ -100,4 +144,6 @@ def validate_all() -> None:
     get_telegram_token()
     get_telegram_chat_id()
     get_groq_key()
+    get_cloudflare_account_id()
+    get_cloudflare_token()
     get_database_url()
