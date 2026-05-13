@@ -187,3 +187,93 @@ def delete_memory(memory_id: UUID) -> bool:
     with _get_pool().connection() as conn, conn.cursor() as cur:
         cur.execute("delete from memories where id = %s", (memory_id,))
         return cur.rowcount > 0
+
+
+class SpaceNotEmpty(RuntimeError):
+    """delete_space sin force con memorias asociadas."""
+
+
+class SpaceProtected(RuntimeError):
+    """Intento de operacion destructiva sobre un espacio protegido (ej. global)."""
+
+
+PROTECTED_SPACES = frozenset({"global"})
+
+
+def create_space(
+    id: str,
+    nombre: str,
+    *,
+    descripcion: str | None = None,
+    es_global: bool = False,
+) -> Space:
+    """Crea un espacio. El id debe ser snake_case alfanumerico."""
+    import re
+    if not re.fullmatch(r"[a-z][a-z0-9_]{0,30}", id):
+        raise ValueError(
+            f"id invalido: {id!r}. Usa snake_case alfanumerico, "
+            f"primera letra minuscula, max 31 chars"
+        )
+    with _get_pool().connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            insert into spaces (id, nombre, descripcion, es_global, activo)
+            values (%s, %s, %s, %s, true)
+            returning id, nombre, descripcion, activo, es_global
+            """,
+            (id, nombre, descripcion, es_global),
+        )
+        return Space.from_row(cur.fetchone())
+
+
+def archive_space(id: str) -> bool:
+    """Marca un espacio como inactivo. Sigue accesible para search pero no para captura."""
+    if id in PROTECTED_SPACES:
+        raise SpaceProtected(f"No se puede archivar el espacio protegido '{id}'")
+    with _get_pool().connection() as conn, conn.cursor() as cur:
+        cur.execute("update spaces set activo = false where id = %s", (id,))
+        return cur.rowcount > 0
+
+
+def unarchive_space(id: str) -> bool:
+    with _get_pool().connection() as conn, conn.cursor() as cur:
+        cur.execute("update spaces set activo = true where id = %s", (id,))
+        return cur.rowcount > 0
+
+
+def count_memories_in_space(id: str) -> int:
+    with _get_pool().connection() as conn, conn.cursor() as cur:
+        cur.execute("select count(*) as n from memories where space_id = %s", (id,))
+        return int(cur.fetchone()["n"])
+
+
+def count_memories_total() -> int:
+    with _get_pool().connection() as conn, conn.cursor() as cur:
+        cur.execute("select count(*) as n from memories")
+        return int(cur.fetchone()["n"])
+
+
+def delete_space(id: str, *, force: bool = False) -> int:
+    """Elimina un espacio. Devuelve numero de memorias borradas.
+
+    - Si tiene memorias y force=False → SpaceNotEmpty
+    - Si tiene memorias y force=True → borra memorias y luego espacio
+    - Espacios en PROTECTED_SPACES no se pueden borrar (SpaceProtected)
+    """
+    if id in PROTECTED_SPACES:
+        raise SpaceProtected(f"No se puede borrar el espacio protegido '{id}'")
+
+    with _get_pool().connection() as conn, conn.cursor() as cur:
+        cur.execute("select count(*) as n from memories where space_id = %s", (id,))
+        n_memories = int(cur.fetchone()["n"])
+
+        if n_memories > 0 and not force:
+            raise SpaceNotEmpty(
+                f"El espacio '{id}' tiene {n_memories} memorias. "
+                f"Pasa force=True para borrarlas o archive_space para conservarlas."
+            )
+
+        if n_memories > 0:
+            cur.execute("delete from memories where space_id = %s", (id,))
+        cur.execute("delete from spaces where id = %s", (id,))
+        return n_memories
