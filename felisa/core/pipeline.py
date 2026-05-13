@@ -1,0 +1,65 @@
+"""Pipeline de captura: structuring + embedding + insert.
+
+Usado por la CLI (sincrono) y por el daemon (retry de cola).
+"""
+
+from __future__ import annotations
+
+import logging
+from uuid import UUID
+
+from . import db, embeddings, structuring
+from .embeddings import EmbeddingUnavailable
+from .structuring import StructuredMemory, StructuringError
+
+log = logging.getLogger(__name__)
+
+
+class PipelineError(RuntimeError):
+    """Falla recuperable: el caller decide si reintentar o encolar."""
+
+
+def process(
+    texto: str,
+    *,
+    tipo_override: str | None = None,
+    espacio_override: str | None = None,
+) -> tuple[UUID, StructuredMemory]:
+    """Estructura, embeda e inserta. Devuelve (uuid, structured).
+
+    Excepciones:
+    - EmbeddingUnavailable: Ollama no responde → caller debe encolar
+    - StructuringError: Haiku invalido → caller debe encolar
+    - PipelineError: error generico envolviendo causas DB
+    """
+    structured = structuring.structure(texto)
+
+    if tipo_override:
+        if tipo_override not in structuring.VALID_TIPOS:
+            raise PipelineError(
+                f"tipo_override invalido: {tipo_override!r}. "
+                f"Validos: {sorted(structuring.VALID_TIPOS)}"
+            )
+        structured.tipo = tipo_override
+
+    if espacio_override:
+        valid_spaces = {s.id for s in db.list_spaces()}
+        if espacio_override not in valid_spaces:
+            raise PipelineError(
+                f"espacio_override invalido: {espacio_override!r}. "
+                f"Disponibles: {sorted(valid_spaces)}"
+            )
+        structured.space_id = espacio_override
+
+    embedding = embeddings.embed(structured.contenido_estructurado)
+
+    memory_id = db.insert_memory(
+        contenido=texto,
+        contenido_estructurado=structured.contenido_estructurado,
+        tipo=structured.tipo,
+        space_id=structured.space_id,
+        proyecto=structured.proyecto,
+        tags=structured.tags,
+        embedding=embedding,
+    )
+    return memory_id, structured
