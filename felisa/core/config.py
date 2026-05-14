@@ -95,6 +95,7 @@ def _read_macos_keychain(service: str, env_var: str | None) -> str:
 def _read_linux_keyring(service: str, env_var: str | None) -> str:
     try:
         import keyring  # lazy: solo Linux lo necesita
+        from keyring.errors import KeyringError
     except ImportError as exc:
         if env_var:
             raise MissingCredential(
@@ -105,7 +106,23 @@ def _read_linux_keyring(service: str, env_var: str | None) -> str:
             f"Falta el paquete `keyring` y no hay env var fallback para '{service}'."
         ) from exc
 
-    value = keyring.get_password(service, KEYCHAIN_ACCOUNT)
+    try:
+        value = keyring.get_password(service, KEYCHAIN_ACCOUNT)
+    except KeyringError as exc:
+        # CI / containers sin GUI session: no hay Secret Service ni KWallet.
+        # `keyring` levanta NoKeyringError. La convertimos en MissingCredential
+        # para que los callers (incluido el skip-if-no-creds de los tests)
+        # la traten uniformemente.
+        if env_var:
+            raise MissingCredential(
+                f"No hay backend de keyring disponible para '{service}' "
+                f"(esperable en CI/containers sin sesion grafica). "
+                f"Seteá la env var {env_var}."
+            ) from exc
+        raise MissingCredential(
+            f"No hay backend de keyring para '{service}' y no hay env var fallback."
+        ) from exc
+
     if value:
         return value
     env_hint = f" (o env var {env_var})" if env_var else ""
