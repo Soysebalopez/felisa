@@ -276,9 +276,13 @@ async def test_429_respects_retry_after(
 
     async def _drive():
         task = asyncio.create_task(bot.run())
-        # ceder ciclos para que el bot consuma el RateLimited y luego el update real
-        for _ in range(20):
-            await real_sleep(0)
+        # Esperamos a que el bot consuma el RateLimited y luego el update real.
+        # En lugar de yield-count fijo (flaky en CI por scheduling), esperamos
+        # a la condicion observable con un timeout robusto.
+        for _ in range(200):
+            await real_sleep(0.01)
+            if api.sent:
+                break
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
@@ -322,8 +326,12 @@ async def test_network_failure_uses_backoff_and_recovers(
 
     async def _drive():
         task = asyncio.create_task(bot.run())
-        for _ in range(40):
-            await real_sleep(0)
+        # Esperar a la condicion observable (sent no vacio) en lugar de
+        # yield-count fijo, que es flaky en CI por scheduling.
+        for _ in range(200):
+            await real_sleep(0.01)
+            if api.sent:
+                break
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task

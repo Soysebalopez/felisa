@@ -11,6 +11,23 @@ from __future__ import annotations
 import pytest
 
 from felisa.core import structuring
+from felisa.core.config import MissingCredential
+
+
+def _have_anthropic() -> bool:
+    try:
+        from felisa.core.config import get_anthropic_key
+        get_anthropic_key()
+        return True
+    except (MissingCredential, Exception):
+        return False
+
+
+pytestmark = pytest.mark.skipif(
+    not _have_anthropic(),
+    reason="ANTHROPIC_API_KEY no disponible (esperado en CI sin creds)",
+)
+
 
 AVAILABLE_SPACES = ["global", "trabajo", "personal"]
 
