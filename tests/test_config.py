@@ -11,6 +11,21 @@ from pathlib import Path
 import pytest
 
 from felisa.core import config
+from felisa.core.config import MissingCredential
+
+
+def _have_all_creds() -> bool:
+    try:
+        config.validate_all()
+        return True
+    except (MissingCredential, Exception):
+        return False
+
+
+pytestmark = pytest.mark.skipif(
+    not _have_all_creds(),
+    reason="credenciales no disponibles (esperado en CI sin Keychain/env vars)",
+)
 
 
 def test_anthropic_key_format() -> None:

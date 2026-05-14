@@ -13,6 +13,21 @@ from collections.abc import Iterator
 import pytest
 
 from felisa.core import db
+from felisa.core.config import MissingCredential
+
+
+def _have_db() -> bool:
+    try:
+        db.list_spaces()
+        return True
+    except (MissingCredential, Exception):
+        return False
+
+
+pytestmark = pytest.mark.skipif(
+    not _have_db(),
+    reason="DATABASE_URL no disponible (esperado en CI sin Postgres real)",
+)
 
 
 def _random_embedding() -> list[float]:
