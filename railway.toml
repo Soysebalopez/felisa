@@ -7,3 +7,16 @@ healthcheckPath = "/health"
 healthcheckTimeout = 30
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 5
+
+# Env vars que el usuario tiene que setear en Railway (UI o `railway variables`):
+#
+#   DATABASE_URL              (auto-vinculado si usas el servicio Postgres del template)
+#   FELISA_API_TOKEN          (genera uno con: python -c 'import secrets; print(secrets.token_urlsafe(32))')
+#   ANTHROPIC_API_KEY         (de console.anthropic.com — opcional para el MCP, requerido si usas create_memory)
+#   CLOUDFLARE_ACCOUNT_ID     (de dash.cloudflare.com)
+#   CLOUDFLARE_API_TOKEN      (de dash.cloudflare.com/profile/api-tokens, scope Workers AI Edit)
+#   MCP_PUBLIC_URL            (la URL publica que Railway te asigna — settear despues del primer deploy)
+#
+# Opcional:
+#   MCP_ALLOWED_HOSTS         (CSV, ademas de la URL publica)
+#   MCP_ALLOWED_ORIGINS       (CSV, ademas de https://claude.ai)

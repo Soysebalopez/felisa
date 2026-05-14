@@ -13,8 +13,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Awaitable, Callable
 
 from felisa.core import pipeline, queue
 from felisa.core.agent import Agent

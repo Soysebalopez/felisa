@@ -18,7 +18,7 @@ import textwrap
 from felisa.core import db, embeddings, pipeline
 from felisa.core.embeddings import EmbeddingUnavailable
 from felisa.core.queue import QueueItem, enqueue, list_pending
-from felisa.core.structuring import StructuringError, VALID_TIPOS
+from felisa.core.structuring import VALID_TIPOS, StructuringError
 
 
 def _print_memory(idx: int, m, distance: float | None = None) -> None:

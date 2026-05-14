@@ -51,7 +51,7 @@ class TelegramAPI:
         if self._owns_client:
             await self._client.aclose()
 
-    async def __aenter__(self) -> "TelegramAPI":
+    async def __aenter__(self) -> TelegramAPI:
         return self
 
     async def __aexit__(self, *_exc: object) -> None:

@@ -33,7 +33,6 @@ from starlette.responses import HTMLResponse, RedirectResponse, Response
 
 from felisa.mcp import oauth_storage
 
-
 MCP_SCOPE = "user"
 CODE_TTL_SECONDS = 300
 TOKEN_TTL_SECONDS = 3600

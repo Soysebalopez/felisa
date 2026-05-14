@@ -6,7 +6,7 @@ Mockean pipeline.process para no llamar Haiku/Ollama/Postgres reales.
 from __future__ import annotations
 
 from pathlib import Path
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 

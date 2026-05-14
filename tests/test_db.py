@@ -13,8 +13,6 @@ from collections.abc import Iterator
 import pytest
 
 from felisa.core import db
-from felisa.core.models import Memory
-
 
 CLEANUP_TAG = "pytest-cleanup"
 

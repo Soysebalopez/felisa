@@ -20,7 +20,7 @@ class Memory:
     created_at: datetime | None = None
 
     @classmethod
-    def from_row(cls, row: dict) -> "Memory":
+    def from_row(cls, row: dict) -> Memory:
         return cls(
             id=row["id"],
             contenido=row["contenido"],
@@ -43,7 +43,7 @@ class Space:
     es_global: bool = False
 
     @classmethod
-    def from_row(cls, row: dict) -> "Space":
+    def from_row(cls, row: dict) -> Space:
         return cls(
             id=row["id"],
             nombre=row["nombre"],

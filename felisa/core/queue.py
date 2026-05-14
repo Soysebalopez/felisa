@@ -23,7 +23,7 @@ import os
 import uuid
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 QUEUE_DIR = Path.home() / ".felisa"
@@ -38,7 +38,7 @@ class QueueItem:
     espacio_override: str | None = None
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     captured_at: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+        default_factory=lambda: datetime.now(UTC).isoformat()
     )
     attempts: int = 0
     last_error: str | None = None
@@ -47,7 +47,7 @@ class QueueItem:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict) -> "QueueItem":
+    def from_dict(cls, data: dict) -> QueueItem:
         return cls(**data)
 
 

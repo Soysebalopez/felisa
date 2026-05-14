@@ -9,8 +9,7 @@ import logging
 from uuid import UUID
 
 from . import db, embeddings, structuring
-from .embeddings import EmbeddingUnavailable
-from .structuring import StructuredMemory, StructuringError
+from .structuring import StructuredMemory
 
 log = logging.getLogger(__name__)
 

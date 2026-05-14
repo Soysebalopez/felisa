@@ -8,13 +8,12 @@ psycopg que ya usa el resto del codigo.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from mcp.server.auth.provider import AccessToken
 from mcp.shared.auth import OAuthClientInformationFull
 
 from felisa.core import db
-
 
 # Schema inline para evitar acoplar el package a la ubicacion de sql/ en disco.
 # Es el mismo cuerpo de sql/002_oauth_tokens.sql; mantenerlos sincronizados.
@@ -72,7 +71,7 @@ def load_client(client_id: str) -> OAuthClientInformationFull | None:
 
 def save_token(token: AccessToken) -> None:
     expires_at = (
-        datetime.fromtimestamp(token.expires_at, tz=timezone.utc)
+        datetime.fromtimestamp(token.expires_at, tz=UTC)
         if token.expires_at
         else None
     )

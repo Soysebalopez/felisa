@@ -5,6 +5,7 @@ Usan un id de prueba con prefijo `pytest_` y limpian en fixture.
 
 from __future__ import annotations
 
+import contextlib
 import random
 import uuid
 from collections.abc import Iterator
@@ -25,10 +26,8 @@ def test_space() -> Iterator[str]:
     sid = f"pytest_{uuid.uuid4().hex[:8]}"
     yield sid
     # Cleanup robusto
-    try:
+    with contextlib.suppress(Exception):
         db.delete_space(sid, force=True)
-    except Exception:
-        pass
 
 
 def test_create_space_basic(test_space: str) -> None:

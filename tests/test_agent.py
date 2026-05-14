@@ -6,6 +6,7 @@ del loop conversacional mockean `anthropic.Anthropic` para evitar costos.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import uuid
 from collections.abc import Iterator
@@ -17,7 +18,6 @@ import pytest
 
 from felisa.core import agent, db
 
-
 # ---- tests de execute_tool ------------------------------------------------
 
 
@@ -25,10 +25,8 @@ from felisa.core import agent, db
 def test_space() -> Iterator[str]:
     sid = f"pytest_{uuid.uuid4().hex[:8]}"
     yield sid
-    try:
+    with contextlib.suppress(Exception):
         db.delete_space(sid, force=True)
-    except Exception:
-        pass
 
 
 def test_tool_list_spaces_returns_active_only() -> None:

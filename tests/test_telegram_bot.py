@@ -7,6 +7,7 @@ credenciales reales. Cada test es chico y deterministico.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from pathlib import Path
 from uuid import uuid4
 
@@ -126,10 +127,8 @@ async def _run_until_quiet(bot: TelegramBot, *, timeout: float = 0.5) -> None:
     task = asyncio.create_task(bot.run())
     await asyncio.sleep(timeout)
     task.cancel()
-    try:
+    with contextlib.suppress(asyncio.CancelledError):
         await task
-    except asyncio.CancelledError:
-        pass
 
 
 async def test_filter_rejects_foreign_chat(
@@ -281,10 +280,8 @@ async def test_429_respects_retry_after(
         for _ in range(20):
             await real_sleep(0)
         task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await task
-        except asyncio.CancelledError:
-            pass
 
     await _drive()
     assert 1 in sleeps  # respeto el retry_after=1
@@ -328,10 +325,8 @@ async def test_network_failure_uses_backoff_and_recovers(
         for _ in range(40):
             await real_sleep(0)
         task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await task
-        except asyncio.CancelledError:
-            pass
 
     await _drive()
     assert 1 in sleeps  # primer backoff de la secuencia

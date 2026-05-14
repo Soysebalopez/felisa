@@ -12,7 +12,6 @@ import pytest
 
 from felisa.core import structuring
 
-
 AVAILABLE_SPACES = ["global", "trabajo", "personal"]
 
 
