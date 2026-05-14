@@ -25,18 +25,25 @@ import signal
 import sys
 from pathlib import Path
 
-from felisa.core import config, pipeline, queue
+from felisa.core import config, pipeline, proposals, queue
 from felisa.core.agent import Agent
 from felisa.core.config import MissingCredential
 from felisa.core.embeddings import EmbeddingUnavailable
 from felisa.core.queue import QueueItem
 from felisa.core.structuring import StructuringError
-from felisa.telegram.api import TelegramAPI
+from felisa.telegram.api import (
+    RateLimited,
+    TelegramAPI,
+    TelegramAuthError,
+    TelegramUnavailable,
+)
 from felisa.telegram.bot import TelegramBot
 from felisa.telegram.whisper import transcribe as whisper_transcribe
 
 DEFAULT_INTERVAL_SECONDS = 60
 DEFAULT_MAX_ATTEMPTS = 10
+PROPOSALS_DISPATCH_INTERVAL = 5
+PROPOSALS_EXPIRE_INTERVAL = 300
 LOG_PATH = Path.home() / ".felisa" / "daemon.log"
 
 log = logging.getLogger("felisa.daemon")
@@ -150,13 +157,46 @@ async def _queue_drainer(*, interval: int, max_attempts: int) -> None:
         await asyncio.sleep(interval)
 
 
+async def _proposals_dispatcher(bot: TelegramBot) -> None:
+    """Envia propuestas pendientes via Telegram cada N segundos."""
+    log.info("proposals dispatcher iniciado (interval=%ds)", PROPOSALS_DISPATCH_INTERVAL)
+    while True:
+        try:
+            sent = await bot.dispatch_pending_proposals()
+            if sent:
+                log.info("dispatcher: %d propuesta(s) enviada(s)", sent)
+        except TelegramAuthError:
+            raise
+        except (TelegramUnavailable, RateLimited) as exc:
+            log.warning("dispatcher: telegram no disponible (%s)", exc)
+        except Exception:
+            log.exception("dispatcher: error inesperado, continuo")
+        await asyncio.sleep(PROPOSALS_DISPATCH_INTERVAL)
+
+
+async def _proposals_expirer() -> None:
+    """Marca como expired las propuestas cuyo TTL ya vencio."""
+    log.info("proposals expirer iniciado (interval=%ds)", PROPOSALS_EXPIRE_INTERVAL)
+    while True:
+        try:
+            affected = await asyncio.to_thread(proposals.expire_old)
+            if affected:
+                log.info("expirer: %d propuesta(s) marcada(s) expired", affected)
+        except Exception:
+            log.exception("expirer: error inesperado, continuo")
+        await asyncio.sleep(PROPOSALS_EXPIRE_INTERVAL)
+
+
 async def _telegram_loop() -> None:
-    """Long polling de Telegram. Si faltan creds, duerme para siempre sin romper."""
+    """Long polling de Telegram + dispatcher de propuestas + expirer.
+
+    Si faltan creds, duerme para siempre sin romper. Si Telegram esta caido o
+    el bot levanta excepcion, la propaga al orquestador para que LaunchAgent
+    relance el daemon entero.
+    """
     try:
         token = config.get_telegram_token()
         chat_id_raw = config.get_telegram_chat_id()
-        # Tambien validamos Groq porque el bot lo usa para voz; sin Groq se desactiva voz
-        # pero el bot levanta igual.
     except MissingCredential as exc:
         log.warning("telegram desactivado: %s", exc)
         await asyncio.Event().wait()
@@ -181,7 +221,10 @@ async def _telegram_loop() -> None:
         bot = TelegramBot(
             api, chat_id=chat_id, agent=agent, transcribe=transcribe_fn,
         )
-        await bot.run()
+        async with asyncio.TaskGroup() as tg:
+            tg.create_task(bot.run(), name="telegram-poll")
+            tg.create_task(_proposals_dispatcher(bot), name="proposals-dispatcher")
+            tg.create_task(_proposals_expirer(), name="proposals-expirer")
 
 
 async def _run_async(*, interval: int, max_attempts: int) -> None:
