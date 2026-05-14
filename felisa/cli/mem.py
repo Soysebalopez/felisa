@@ -3,9 +3,9 @@
 Uso:
   mem "texto libre"                   # guardar (default)
   mem --tipo patron "texto"           # forzar tipo
-  mem --espacio simplistic "texto"    # forzar espacio
+  mem --espacio <space_id> "texto"    # forzar espacio
   mem buscar "consulta"               # busqueda semantica
-  mem listar [--espacio whitebay]     # ultimas 20 del espacio
+  mem listar [--espacio <space_id>]   # ultimas 20 del espacio
   mem cola                            # ver items pendientes en cola offline
 """
 

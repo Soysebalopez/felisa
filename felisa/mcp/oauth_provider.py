@@ -111,7 +111,7 @@ class FelisaOAuthProvider(
 </head>
 <body>
   <h1>Felisa</h1>
-  <p>Memoria persistente de Seba.<br>
+  <p>Memoria personal persistente.<br>
   Estas autorizando un cliente MCP a leer tu memoria. Pega tu FELISA_API_TOKEN para continuar.</p>
   <form action="{self.server_url}/login/callback" method="post">
     <input type="hidden" name="state" value="{state}">

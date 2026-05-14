@@ -25,8 +25,11 @@ create table if not exists memories (
 create index if not exists memories_embedding_idx
   on memories using hnsw (embedding vector_cosine_ops);
 
+-- El unico espacio que viene por default es 'global' (preferencias e info universales).
+-- Los espacios de trabajo (workspace, personal, cliente_x, ...) los crea el usuario:
+--   - via el wizard `python scripts/install.py`
+--   - via el agente:  felisa "creame un espacio para mi trabajo en X"
+--   - via SQL directo si quiere
 insert into spaces (id, nombre, descripcion, es_global) values
-  ('global',    'Global',    'Reglas y preferencias universales',          true),
-  ('whitebay',  'Whitebay',  'Proyectos y productos de Whitebay',          false),
-  ('simplistic','Simplistic','Trabajo en Simplistic',                      false)
+  ('global', 'Global', 'Reglas y preferencias universales', true)
 on conflict (id) do nothing;

@@ -21,7 +21,8 @@ from .config import get_anthropic_key
 MODEL = "claude-haiku-4-5-20251001"
 MAX_TOKENS = 800
 TEMPERATURE = 0.0
-PROMPT_PATH = Path(__file__).parent / "prompts" / "structure.md"
+DEFAULT_PROMPT_PATH = Path(__file__).parent / "prompts" / "structure.md"
+USER_PROMPT_PATH = Path.home() / ".felisa" / "prompts" / "structure.md"
 NOTES_MARKER = "## Notas para la implementacion"
 
 VALID_TIPOS = frozenset({
@@ -48,7 +49,12 @@ class StructuredMemory:
 
 
 def _load_prompt_template() -> str:
-    return PROMPT_PATH.read_text(encoding="utf-8")
+    """Carga el prompt de estructuracion. Si existe `~/.felisa/prompts/structure.md`
+    lo prefiere sobre el default del paquete — asi cada usuario puede personalizar
+    sus ejemplos sin tocar el repo."""
+    if USER_PROMPT_PATH.exists():
+        return USER_PROMPT_PATH.read_text(encoding="utf-8")
+    return DEFAULT_PROMPT_PATH.read_text(encoding="utf-8")
 
 
 def _build_system_prompt(space_ids: list[str]) -> str:

@@ -9,7 +9,7 @@ Formato: array JSON. Cada item:
   "id": "uuid",
   "texto": "texto crudo",
   "tipo_override": "patron" | null,
-  "espacio_override": "simplistic" | null,
+  "espacio_override": "<space_id>" | null,
   "captured_at": "ISO 8601",
   "attempts": 0,
   "last_error": "string" | null

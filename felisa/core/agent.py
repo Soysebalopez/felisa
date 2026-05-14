@@ -18,14 +18,22 @@ from typing import Any
 import anthropic
 
 from . import db, embeddings, pipeline
-from .config import get_anthropic_key
+from .config import get_anthropic_key, get_user_name
 from .embeddings import EmbeddingUnavailable
 from .structuring import StructuringError
 
 MODEL = "claude-sonnet-4-6"
 MAX_TOKENS = 4096
 MAX_TOOL_ITERATIONS = 20
-PROMPT_PATH = Path(__file__).parent / "prompts" / "agent.md"
+DEFAULT_PROMPT_PATH = Path(__file__).parent / "prompts" / "agent.md"
+USER_PROMPT_PATH = Path.home() / ".felisa" / "prompts" / "agent.md"
+
+
+def _load_prompt_template() -> str:
+    """Idem structuring: `~/.felisa/prompts/agent.md` pisa el default del paquete."""
+    if USER_PROMPT_PATH.exists():
+        return USER_PROMPT_PATH.read_text(encoding="utf-8")
+    return DEFAULT_PROMPT_PATH.read_text(encoding="utf-8")
 
 
 TOOLS: list[dict[str, Any]] = [
@@ -269,7 +277,7 @@ def execute_tool(name: str, args: dict) -> str:
 
 
 def _build_system_prompt(user_name: str) -> str:
-    template = PROMPT_PATH.read_text(encoding="utf-8")
+    template = _load_prompt_template()
     marker = "## Prompt"
     if marker in template:
         template = template[template.index(marker) + len(marker):].lstrip()
@@ -291,7 +299,7 @@ def _build_system_prompt(user_name: str) -> str:
 
 @dataclass
 class Agent:
-    user_name: str = "Seba"
+    user_name: str = field(default_factory=get_user_name)
     history: list[dict] = field(default_factory=list)
     _client: anthropic.Anthropic | None = field(default=None, init=False, repr=False)
 

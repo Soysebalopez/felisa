@@ -22,6 +22,7 @@ from rich.panel import Panel
 
 from felisa.core import db
 from felisa.core.agent import Agent
+from felisa.core.config import get_user_name
 
 console = Console()
 
@@ -39,7 +40,10 @@ Cualquier otra cosa se manda al agente.
 def _opening_line() -> str:
     spaces = db.list_spaces()
     total = db.count_memories_total()
-    return f"Hola Seba. Tenes {len(spaces)} espacios activos y {total} memorias en total. ¿Que necesitas?"
+    return (
+        f"Hola {get_user_name()}. Tenes {len(spaces)} espacios activos y "
+        f"{total} memorias en total. ¿Que necesitas?"
+    )
 
 
 def _render_reply(text: str) -> None:

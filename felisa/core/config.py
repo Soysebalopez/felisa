@@ -81,6 +81,17 @@ def _read_keychain(service: str) -> str:
 
 
 @lru_cache(maxsize=1)
+def get_user_name() -> str:
+    """Nombre del usuario que el agente y los prompts usan para personalizar.
+
+    Lee de la env var `FELISA_USER_NAME`. Si falta, devuelve "el usuario".
+    A diferencia de las credenciales, este valor no es secreto.
+    """
+    name = os.environ.get("FELISA_USER_NAME", "").strip()
+    return name or "el usuario"
+
+
+@lru_cache(maxsize=1)
 def get_anthropic_key() -> str:
     return _read_keychain("felisa-anthropic-key")
 

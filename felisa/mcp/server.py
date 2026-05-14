@@ -91,7 +91,7 @@ oauth_provider = FelisaOAuthProvider(
 mcp = FastMCP(
     "Felisa",
     instructions=(
-        "Memoria persistente de Seba (Sebastian Lopez). Tools de lectura: "
+        "Memoria personal persistente. Tools de lectura: "
         "`search_memories` cuando el usuario habla de un tema, `list_spaces` "
         "para conocer los espacios disponibles, `list_recent_memories` para "
         "contexto reciente, `count_memories` para totales. Tool de escritura: "
@@ -147,7 +147,7 @@ def search_memories(
 
     Args:
         query: texto a buscar (lenguaje natural)
-        space: filtrar por espacio (whitebay, simplistic, global, ...)
+        space: filtrar por espacio (global, o los que tenga configurados el usuario)
         tipo: filtrar por tipo (decision_tecnica, patron, framework, modo_trabajo, contexto_proyecto, global)
         limit: cantidad maxima de resultados (default 5)
     """
