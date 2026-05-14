@@ -15,7 +15,22 @@ from mcp.server.auth.provider import AccessToken
 from mcp.shared.auth import OAuthClientInformationFull
 
 from felisa.core import db
+from felisa.core.config import MissingCredential
 from felisa.mcp import oauth_storage
+
+
+def _have_db() -> bool:
+    try:
+        db.list_spaces()
+        return True
+    except (MissingCredential, Exception):
+        return False
+
+
+pytestmark = pytest.mark.skipif(
+    not _have_db(),
+    reason="DATABASE_URL no disponible (esperado en CI sin Postgres real)",
+)
 
 
 @pytest.fixture(autouse=True)
