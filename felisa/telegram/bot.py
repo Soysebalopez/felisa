@@ -16,9 +16,10 @@ import logging
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
-from felisa.core import pipeline, queue
+from felisa.core import pipeline, proposals, queue
 from felisa.core.agent import Agent
 from felisa.core.embeddings import EmbeddingUnavailable
+from felisa.core.proposals import Proposal
 from felisa.core.queue import QueueItem
 from felisa.core.structuring import StructuringError
 
@@ -27,9 +28,10 @@ from .api import RateLimited, TelegramAPI, TelegramAuthError, TelegramUnavailabl
 log = logging.getLogger(__name__)
 
 OFFSET_PATH = Path.home() / ".felisa" / "telegram_offset"
-ALLOWED_UPDATES = ["message"]
+ALLOWED_UPDATES = ["message", "callback_query"]
 BACKOFF_SEQUENCE = (1, 2, 5, 15, 30)
 TYPING_INTERVAL = 4.0
+CALLBACK_PREFIX = "prop"
 
 # Funcion que toma (bytes, mime) y devuelve transcript. Inyectada por el
 # daemon cuando whisper.py este disponible (WHI-682).
@@ -94,8 +96,13 @@ class TelegramBot:
 
     async def _handle_update(self, update: dict) -> None:
         update_id = update.get("update_id")
-        message = update.get("message")
         try:
+            callback = update.get("callback_query")
+            if callback is not None:
+                await self._handle_callback_query(callback)
+                return
+
+            message = update.get("message")
             if message is None:
                 return
 
@@ -250,3 +257,183 @@ class TelegramBot:
             await self._api.send_message(chat_id=self._chat_id, text=text, parse_mode=parse_mode)
         except (TelegramUnavailable, TelegramAuthError, RateLimited) as exc:
             log.warning("no pude responder a Telegram: %s", exc)
+
+    async def dispatch_pending_proposals(self) -> int:
+        """Envia las propuestas pendientes sin telegram_message_id al chat configurado.
+
+        Cada propuesta se manda con un inline keyboard (Guardar/Descartar/Mas tarde).
+        Devuelve cuantas fueron enviadas en esta vuelta. El daemon llama este
+        metodo periodicamente como parte de su loop.
+        """
+        sent = 0
+        for proposal in proposals.list_pending():
+            if proposal.telegram_message_id is not None:
+                continue
+            text = _format_proposal_message(proposal)
+            keyboard = _build_proposal_keyboard(proposal.id)
+            try:
+                response = await self._api.send_message(
+                    chat_id=self._chat_id,
+                    text=text,
+                    parse_mode="Markdown",
+                    reply_markup=keyboard,
+                )
+            except (TelegramUnavailable, RateLimited) as exc:
+                log.warning("no pude enviar propuesta %s: %s", proposal.id[:8], exc)
+                continue
+            except TelegramAuthError:
+                raise
+            message_id = response.get("message_id") if isinstance(response, dict) else None
+            if isinstance(message_id, int):
+                proposals.set_telegram_message_id(proposal.id, message_id)
+                sent += 1
+        return sent
+
+    async def _handle_callback_query(self, callback: dict) -> None:
+        callback_id = callback.get("id")
+        chat = (callback.get("message") or {}).get("chat") or {}
+        if chat.get("id") != self._chat_id:
+            log.warning(
+                "ignorando callback de chat ajeno %s (esperaba %s)",
+                chat.get("id"), self._chat_id,
+            )
+            if isinstance(callback_id, str):
+                await self._ack_callback(callback_id)
+            return
+
+        data = callback.get("data") or ""
+        message = callback.get("message") or {}
+        message_id = message.get("message_id")
+        proposal_id, action = _parse_callback_data(data)
+
+        if proposal_id is None or action is None:
+            log.warning("callback_data invalido: %r", data)
+            if isinstance(callback_id, str):
+                await self._ack_callback(callback_id, text="no entendi")
+            return
+
+        proposal = proposals.get(proposal_id)
+        if proposal is None:
+            log.warning("callback para propuesta inexistente: %s", proposal_id)
+            if isinstance(callback_id, str):
+                await self._ack_callback(callback_id, text="propuesta no encontrada")
+            return
+
+        if action == "defer":
+            if isinstance(callback_id, str):
+                await self._ack_callback(callback_id, text="te aviso de nuevo despues")
+            return
+
+        if action == "reject":
+            proposals.mark(proposal.id, "rejected")
+            if isinstance(message_id, int):
+                await self._edit_proposal_message(
+                    message_id, _format_rejected_message(proposal),
+                )
+            if isinstance(callback_id, str):
+                await self._ack_callback(callback_id, text="descartada")
+            return
+
+        if action == "approve":
+            try:
+                memory_id, structured = await asyncio.to_thread(
+                    pipeline.process,
+                    proposal.texto,
+                    tipo_override=proposal.tipo_sugerido,
+                )
+            except (EmbeddingUnavailable, StructuringError) as exc:
+                log.warning("pipeline fallo aprobando propuesta %s: %s", proposal.id[:8], exc)
+                if isinstance(callback_id, str):
+                    await self._ack_callback(callback_id, text="no pude guardar")
+                return
+            except Exception as exc:
+                log.exception("pipeline fallo no recuperable: %s", exc)
+                if isinstance(callback_id, str):
+                    await self._ack_callback(callback_id, text="error guardando")
+                return
+
+            if memory_id is None:
+                if isinstance(callback_id, str):
+                    await self._ack_callback(callback_id, text="no se pudo clasificar")
+                return
+
+            proposals.mark(proposal.id, "approved")
+            if isinstance(message_id, int):
+                await self._edit_proposal_message(
+                    message_id,
+                    _format_approved_message(proposal, memory_id, structured.space_id),
+                )
+            if isinstance(callback_id, str):
+                await self._ack_callback(callback_id, text="guardada")
+            return
+
+        log.warning("accion desconocida en callback: %r", action)
+        if isinstance(callback_id, str):
+            await self._ack_callback(callback_id)
+
+    async def _edit_proposal_message(self, message_id: int, text: str) -> None:
+        try:
+            await self._api.edit_message_text(
+                chat_id=self._chat_id,
+                message_id=message_id,
+                text=text,
+                parse_mode="Markdown",
+            )
+        except (TelegramUnavailable, TelegramAuthError, RateLimited) as exc:
+            log.warning("no pude editar mensaje %d: %s", message_id, exc)
+
+    async def _ack_callback(self, callback_id: str, *, text: str | None = None) -> None:
+        try:
+            await self._api.answer_callback_query(callback_query_id=callback_id, text=text)
+        except (TelegramUnavailable, TelegramAuthError, RateLimited) as exc:
+            log.warning("no pude ack callback %s: %s", callback_id, exc)
+
+
+def _format_proposal_message(p: Proposal) -> str:
+    return (
+        "Guardar esta memoria?\n\n"
+        f"> {p.texto}\n\n"
+        f"_{p.contexto}_\n"
+        f"Tipo: {p.tipo_sugerido} · Confianza: {p.confianza:.0%}"
+    )
+
+
+def _format_approved_message(p: Proposal, memory_id, space_id: str) -> str:
+    return (
+        "Guardada.\n\n"
+        f"> {p.texto}\n\n"
+        f"_{p.contexto}_\n"
+        f"id: `{memory_id}` · espacio: {space_id}"
+    )
+
+
+def _format_rejected_message(p: Proposal) -> str:
+    return (
+        "Descartada.\n\n"
+        f"> {p.texto}\n\n"
+        f"_{p.contexto}_"
+    )
+
+
+def _build_proposal_keyboard(proposal_id: str) -> dict:
+    return {
+        "inline_keyboard": [
+            [
+                {"text": "Guardar", "callback_data": f"{CALLBACK_PREFIX}:{proposal_id}:approve"},
+                {"text": "Descartar", "callback_data": f"{CALLBACK_PREFIX}:{proposal_id}:reject"},
+                {"text": "Mas tarde", "callback_data": f"{CALLBACK_PREFIX}:{proposal_id}:defer"},
+            ]
+        ]
+    }
+
+
+def _parse_callback_data(data: str) -> tuple[str | None, str | None]:
+    if not data.startswith(f"{CALLBACK_PREFIX}:"):
+        return None, None
+    parts = data.split(":", 2)
+    if len(parts) != 3:
+        return None, None
+    _, proposal_id, action = parts
+    if action not in {"approve", "reject", "defer"}:
+        return None, None
+    return proposal_id, action

@@ -8,7 +8,8 @@ Guia al usuario desde 0 hasta daemon corriendo:
 4. Pide DATABASE_URL (Railway one-click o pega manual).
 5. Aplica el schema SQL.
 6. Instala el LaunchAgent (macOS) o printa instrucciones systemd (Linux).
-7. Smoke test final.
+7. Opcional: hook SessionEnd de Claude Code para captura automatica.
+8. Smoke test final.
 
 Idempotente: si lo corres dos veces no rompe nada — saltea lo que ya esta.
 
@@ -17,7 +18,9 @@ Run: python scripts/install.py
 
 from __future__ import annotations
 
+import datetime as _dt
 import getpass
+import json
 import os
 import platform
 import shutil
@@ -403,10 +406,91 @@ def _install_systemd_unit() -> None:
             err(f"systemctl fallo: {exc}. Probalo a mano con los comandos de arriba.")
 
 
-# ── Step 7: smoke test ────────────────────────────────────────────────────
+# ── Step 7: hook de Claude Code ───────────────────────────────────────────
+
+CLAUDE_SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
+
+
+def install_claude_code_hook() -> None:
+    step("7/8 — Hook de captura automatica (Claude Code)")
+    if not CLAUDE_SETTINGS_PATH.exists():
+        warn(
+            f"No existe {CLAUDE_SETTINGS_PATH} — parece que no tenes Claude Code "
+            "instalado. Salteando este paso.",
+        )
+        return
+    print(
+        "  El hook analiza cada sesion de Claude Code al cerrar y propone\n"
+        "  memorias para guardar (Haiku detecta candidatos). Las propuestas\n"
+        "  llegan al bot de Telegram (o `mem propuestas` desde CLI) con\n"
+        "  botones para Guardar / Descartar / Mas tarde."
+    )
+    if not ask_yn("¿Activar el hook ahora?", default=False):
+        warn("Salteado. Lo podes activar manualmente despues.")
+        return
+
+    uv_path = shutil.which("uv")
+    if not uv_path:
+        err("uv no esta en PATH — necesario para registrar el comando del hook.")
+        return
+
+    command = f"{uv_path} run --project {REPO_ROOT} felisa-hook-session-end"
+    try:
+        _register_claude_code_hook(command)
+    except (OSError, json.JSONDecodeError) as exc:
+        err(f"no pude modificar {CLAUDE_SETTINGS_PATH}: {exc}")
+        return
+    ok(f"Hook SessionEnd registrado en {CLAUDE_SETTINGS_PATH}.")
+    print(
+        "  La proxima vez que cierres una sesion de Claude Code, las propuestas\n"
+        "  van a aparecer en Telegram (si tenes el daemon corriendo) o en\n"
+        "  `mem propuestas` desde terminal."
+    )
+
+
+def _register_claude_code_hook(command: str) -> None:
+    raw = CLAUDE_SETTINGS_PATH.read_text(encoding="utf-8")
+    data = json.loads(raw) if raw.strip() else {}
+    if not isinstance(data, dict):
+        raise OSError(f"settings.json no es un objeto JSON (es {type(data).__name__})")
+
+    hooks = data.setdefault("hooks", {})
+    if not isinstance(hooks, dict):
+        raise OSError("settings.json.hooks no es un objeto")
+    session_end = hooks.setdefault("SessionEnd", [])
+    if not isinstance(session_end, list):
+        raise OSError("settings.json.hooks.SessionEnd no es una lista")
+
+    for entry in session_end:
+        if isinstance(entry, dict):
+            for hook in entry.get("hooks", []):
+                if isinstance(hook, dict) and hook.get("command") == command:
+                    print("  (la entrada ya existia, no toco nada)")
+                    return
+
+    backup = CLAUDE_SETTINGS_PATH.with_suffix(
+        f".json.bak.{_dt.datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    )
+    backup.write_text(raw, encoding="utf-8")
+    print(f"  Backup en {backup}")
+
+    session_end.append(
+        {
+            "hooks": [
+                {"type": "command", "command": command},
+            ],
+        }
+    )
+    CLAUDE_SETTINGS_PATH.write_text(
+        json.dumps(data, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+
+# ── Step 8: smoke test ────────────────────────────────────────────────────
 
 def smoke_test() -> None:
-    step("7/7 — Smoke test")
+    step("8/8 — Smoke test")
     if not ask_yn("¿Capturar una memoria de prueba ahora?", default=True):
         return
     texto = ask("Texto de prueba", default="primer test de instalacion de Felisa")
@@ -444,6 +528,7 @@ def main() -> int:
     collect_database()
     apply_schema()
     install_daemon()
+    install_claude_code_hook()
     smoke_test()
 
     print(_c("1;32", "\n  ✓ Listo.\n"))

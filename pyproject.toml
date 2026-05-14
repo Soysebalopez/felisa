@@ -24,6 +24,7 @@ mem = "felisa.cli.mem:main"
 felisa = "felisa.cli.felisa:main"
 felisa-daemon = "felisa.daemon.main:main"
 felisa-mcp-server = "felisa.mcp.server:main"
+felisa-hook-session-end = "felisa.hooks.session_end:main"
 
 [dependency-groups]
 dev = [
