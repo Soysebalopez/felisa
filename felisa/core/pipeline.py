@@ -24,8 +24,15 @@ def process(
     *,
     tipo_override: str | None = None,
     espacio_override: str | None = None,
-) -> tuple[UUID, StructuredMemory]:
+    skip_unclassified: bool = False,
+) -> tuple[UUID | None, StructuredMemory]:
     """Estructura, embeda e inserta. Devuelve (uuid, structured).
+
+    Si `skip_unclassified` y Haiku devolvio `tags=['sin-clasificar']`, corta
+    despues de estructurar y devuelve `(None, structured)` sin embed ni insert.
+    Lo usa el bot de Telegram para no guardar saludos / preguntas casuales como
+    memorias (el CLI `mem` no activa este flag — ahi el usuario sabe lo que esta
+    mandando).
 
     Excepciones:
     - EmbeddingUnavailable: Ollama no responde → caller debe encolar
@@ -50,6 +57,10 @@ def process(
                 f"Disponibles: {sorted(valid_spaces)}"
             )
         structured.space_id = espacio_override
+
+    if skip_unclassified and "sin-clasificar" in structured.tags:
+        log.info("descartando memoria sin-clasificar: %r", texto[:60])
+        return None, structured
 
     embedding = embeddings.embed(structured.contenido_estructurado)
 

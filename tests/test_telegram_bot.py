@@ -178,6 +178,33 @@ async def test_offset_persisted_between_polls(
     assert offset_path.read_text() == "43"
 
 
+async def test_unclassified_is_discarded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Cuando Haiku marca sin-clasificar, pipeline.process devuelve (None, _)
+    y el bot responde sin guardar."""
+    api = FakeAPI()
+    api.queue_updates([_text_update(1, "hola")])
+
+    received: list[str] = []
+
+    def fake_process(texto, *, skip_unclassified=False, **_kw):
+        received.append(texto)
+        # Simulamos el comportamiento real del pipeline con la flag activa
+        if skip_unclassified:
+            return None, _structured(tipo="global", space="global")
+        return uuid4(), _structured()
+
+    monkeypatch.setattr(bot_module.pipeline, "process", fake_process)
+
+    bot = TelegramBot(api, chat_id=CHAT_ID, offset_path=tmp_path / "off")
+    await _run_until_quiet(bot)
+
+    assert received == ["hola"]  # pipeline fue llamado
+    assert len(api.sent) == 1
+    assert "no entendi" in api.sent[0]["text"].lower()
+
+
 async def test_pipeline_failure_enqueues(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

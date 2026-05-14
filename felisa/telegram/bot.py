@@ -160,7 +160,9 @@ class TelegramBot:
 
     async def _process_and_confirm(self, texto: str, *, voz: bool = False) -> None:
         try:
-            _memory_id, structured = await asyncio.to_thread(pipeline.process, texto)
+            memory_id, structured = await asyncio.to_thread(
+                pipeline.process, texto, skip_unclassified=True,
+            )
         except (EmbeddingUnavailable, StructuringError) as exc:
             log.info("pipeline fallo recuperable, encolando: %s", exc)
             queue.enqueue(QueueItem(texto=texto))
@@ -171,6 +173,10 @@ class TelegramBot:
         except Exception as exc:
             log.exception("pipeline fallo no recuperable: %s", exc)
             await self._reply("No pude guardar (error inesperado).")
+            return
+
+        if memory_id is None:
+            await self._reply("No entendi esto como memoria, no lo guarde.")
             return
 
         prefix = "Guardado por voz" if voz else "Guardado"
