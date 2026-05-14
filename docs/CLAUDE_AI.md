@@ -13,31 +13,44 @@ que tengas que copiar/pegar nada.
 
 ### 1. Deployar el MCP en Railway
 
-Click acá: **[Deploy to Railway](https://railway.app/template/felisa)** *(URL provisional)*.
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/new/template?template=https%3A%2F%2Fgithub.com%2FSoysebalopez%2Ffelisa)
 
-Railway te pide:
+Click el botón. Railway:
+- Clona el repo `Soysebalopez/felisa` en un proyecto nuevo.
+- Detecta `railway.toml` y crea un servicio que corre `uv run felisa-mcp-server`.
+
+Después del primer build (probablemente va a fallar por falta de env vars y DATABASE_URL — esperable):
+
+#### a) Agregar Postgres
+
+En la UI del proyecto: **+ New → Database → PostgreSQL**. Railway crea el servicio y expone `DATABASE_URL` internamente. Vinculalo al servicio `felisa`:
+
+- Click en el servicio `felisa` → **Variables** → **+ New → Reference variable** → seleccioná `DATABASE_URL` del servicio Postgres.
+
+#### b) Setear el resto de variables
+
+En **Variables** del servicio `felisa`, agregá:
 
 - **`ANTHROPIC_API_KEY`** — la misma que usás localmente.
 - **`CLOUDFLARE_ACCOUNT_ID`** + **`CLOUDFLARE_API_TOKEN`** — embeddings.
-- **`FELISA_API_TOKEN`** — un token random que vas a usar para autenticar desde claude.ai. Generá uno con:
+- **`FELISA_API_TOKEN`** — random, vas a usarlo para autenticar desde claude.ai. Generá:
   ```bash
   python -c "import secrets; print(secrets.token_urlsafe(32))"
   ```
+- **`MCP_PUBLIC_URL`** — la URL pública que Railway te asigna al servicio (`Settings → Networking → Generate Domain`). Algo tipo `https://felisa-production-XXXX.up.railway.app`. Pegala completa con `https://` y sin slash final.
 
-El template incluye Postgres con pgvector preconfigurado (si querés usar el mismo Postgres que tu instancia local, en `DATABASE_URL` pegá tu URL existente — Railway lo respeta).
-
-Railway te da una URL pública tipo `https://felisa-mcp-production.up.railway.app`. Copiala.
+Trigger re-deploy (`Deployments → Redeploy`).
 
 ### 2. Aplicar el schema
 
-Una vez deployado, abrí la consola de Railway en el servicio y corré:
+Una vez que el servicio está corriendo, abrí la consola del Postgres en Railway (`Postgres service → Data → Query`) y pegá el contenido de:
 
 ```bash
-psql $DATABASE_URL -f sql/001_init.sql
-psql $DATABASE_URL -f sql/002_oauth_tokens.sql
+sql/001_init.sql
+sql/002_oauth_tokens.sql
 ```
 
-(O si tu DATABASE_URL apunta a Postgres que ya tenés con el schema, este paso es no-op.)
+(Los podés copiar/pegar directo, o usar `railway connect Postgres` desde tu CLI local apuntando al proyecto que recién creaste.)
 
 ### 3. Registrar el MCP en claude.ai
 

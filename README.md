@@ -1,5 +1,8 @@
 # Felisa
 
+[![CI](https://github.com/Soysebalopez/felisa/actions/workflows/ci.yml/badge.svg)](https://github.com/Soysebalopez/felisa/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 Sistema de memoria persistente para Claude. Captura decisiones, patrones y contexto
 de trabajo desde **terminal, móvil (voz/texto) o claude.ai**, los estructura con
 Haiku, y los hace consultables desde cualquier conversación de Claude.
@@ -30,17 +33,23 @@ Haiku, y los hace consultables desde cualquier conversación de Claude.
 ## Quickstart
 
 ```bash
-git clone https://github.com/soysebalopez/felisa.git
+git clone https://github.com/Soysebalopez/felisa.git
 cd felisa
 uv sync
 python scripts/install.py
 ```
 
 `install.py` te guía paso a paso: te pide las claves (Anthropic, Cloudflare,
-opcional Groq/Telegram), te pregunta dónde queda tu Postgres (Railway one-click
-template o pega URL), aplica el schema, e instala el daemon.
+opcional Groq/Telegram), te pregunta dónde queda tu Postgres, aplica el schema,
+e instala el daemon (LaunchAgent en macOS, systemd `--user` unit en Linux).
 
 Ver [`docs/QUICKSTART.md`](docs/QUICKSTART.md) para el detalle.
+
+### Postgres + MCP en Railway (opcional, para integración con claude.ai)
+
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/new/template?template=https%3A%2F%2Fgithub.com%2FSoysebalopez%2Ffelisa)
+
+Click → Railway clona el repo, lee `railway.toml`, y crea el servicio del MCP server. Después agregás Postgres con un click (`+ New → Database → PostgreSQL`) y seteás las env vars (`ANTHROPIC_API_KEY`, `CLOUDFLARE_*`, `FELISA_API_TOKEN`, `MCP_PUBLIC_URL`). Detalle paso a paso en [`docs/CLAUDE_AI.md`](docs/CLAUDE_AI.md).
 
 ## Docs
 
