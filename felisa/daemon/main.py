@@ -1,29 +1,37 @@
-"""Felisa daemon — retry loop sobre la cola offline.
+"""Felisa daemon — drena la cola offline + corre el bot de Telegram.
 
-Loop infinito que cada `interval` segundos:
-1. Lee items pendientes de `~/.felisa/queue.json`
-2. Para cada item con attempts < max_attempts, intenta procesarlo con pipeline.process
-3. En exito → remove de queue. En fallo → incrementa attempts y guarda error.
+Cuando arranca como LaunchAgent:
+- Una coroutine drena `~/.felisa/queue.json` cada `interval` segundos (pipeline.process
+  → en exito: remove, en fallo: incrementa attempts).
+- Otra coroutine corre el bot de Telegram con long polling. Si faltan
+  credenciales (Keychain), la coroutine queda dormida sin romper el daemon.
 
-Logging a `~/.felisa/daemon.log` con rotacion (5MB, 3 backups).
+Si cualquiera de las dos levanta excepcion no manejada, el daemon termina y
+LaunchAgent lo relanza. SIGTERM/SIGINT cancela ambas limpias.
 
-Para arrancar como LaunchAgent ver `scripts/com.felisa.daemon.plist`.
+`run_once` y `--once` se mantienen sincronos para no tocar Telegram cuando se
+usa el daemon en modo "vaciar cola y salir".
 """
 
 from __future__ import annotations
 
 import argparse
+import asyncio
+import contextlib
 import logging
 import logging.handlers
 import signal
 import sys
-import time
 from pathlib import Path
 
-from felisa.core import pipeline, queue
+from felisa.core import config, pipeline, queue
+from felisa.core.config import MissingCredential
 from felisa.core.embeddings import EmbeddingUnavailable
 from felisa.core.queue import QueueItem
 from felisa.core.structuring import StructuringError
+from felisa.telegram.api import TelegramAPI
+from felisa.telegram.bot import TelegramBot
+from felisa.telegram.whisper import transcribe as whisper_transcribe
 
 DEFAULT_INTERVAL_SECONDS = 60
 DEFAULT_MAX_ATTEMPTS = 10
@@ -105,44 +113,108 @@ def run_once(*, max_attempts: int = DEFAULT_MAX_ATTEMPTS) -> dict[str, int]:
     }
 
 
+async def _queue_drainer(*, interval: int, max_attempts: int) -> None:
+    """Drena la cola cada `interval` segundos hasta que sea cancelada."""
+    log.info("queue drainer iniciado (interval=%ds max_attempts=%d)", interval, max_attempts)
+    while True:
+        try:
+            summary = await asyncio.to_thread(run_once, max_attempts=max_attempts)
+            if summary["total"] > 0:
+                log.info("ciclo cola: %s", summary)
+        except Exception:
+            log.exception("error en ciclo del drainer, continuo")
+        await asyncio.sleep(interval)
+
+
+async def _telegram_loop() -> None:
+    """Long polling de Telegram. Si faltan creds, duerme para siempre sin romper."""
+    try:
+        token = config.get_telegram_token()
+        chat_id_raw = config.get_telegram_chat_id()
+        # Tambien validamos Groq porque el bot lo usa para voz; sin Groq se desactiva voz
+        # pero el bot levanta igual.
+    except MissingCredential as exc:
+        log.warning("telegram desactivado: %s", exc)
+        await asyncio.Event().wait()
+        return  # pragma: no cover
+
+    try:
+        chat_id = int(chat_id_raw)
+    except ValueError:
+        log.error("TELEGRAM_CHAT_ID no es numerico: %r → bot desactivado", chat_id_raw)
+        await asyncio.Event().wait()
+        return  # pragma: no cover
+
+    try:
+        config.get_groq_key()
+        transcribe_fn = whisper_transcribe
+    except MissingCredential:
+        log.warning("groq no disponible: voz desactivada, texto sigue funcionando")
+        transcribe_fn = None
+
+    async with TelegramAPI(token) as api:
+        bot = TelegramBot(api, chat_id=chat_id, transcribe=transcribe_fn)
+        await bot.run()
+
+
+async def _run_async(*, interval: int, max_attempts: int) -> None:
+    """Orquesta drainer + telegram. Si cualquiera levanta, ambos paran."""
+    drainer = asyncio.create_task(
+        _queue_drainer(interval=interval, max_attempts=max_attempts),
+        name="queue-drainer",
+    )
+    telegram = asyncio.create_task(_telegram_loop(), name="telegram")
+
+    loop = asyncio.get_running_loop()
+    stop_event = asyncio.Event()
+
+    def _on_sig(signum: int) -> None:
+        log.info("recibida senal %s, terminando limpio", signum)
+        stop_event.set()
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        with contextlib.suppress(NotImplementedError):
+            loop.add_signal_handler(sig, _on_sig, sig)
+
+    stop_task = asyncio.create_task(stop_event.wait(), name="stop-waiter")
+
+    try:
+        done, _pending = await asyncio.wait(
+            {drainer, telegram, stop_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+    finally:
+        for t in (drainer, telegram, stop_task):
+            t.cancel()
+        for t in (drainer, telegram, stop_task):
+            with contextlib.suppress(asyncio.CancelledError):
+                await t
+
+    for t in done:
+        if t is stop_task or t.cancelled():
+            continue
+        exc = t.exception()
+        if exc is not None:
+            raise exc
+
+
 def run_forever(
     *,
     interval: int = DEFAULT_INTERVAL_SECONDS,
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
 ) -> None:
-    log.info("felisa daemon iniciado. interval=%ds max_attempts=%d", interval, max_attempts)
-    _stop = False
-
-    def _on_sig(signum, _frame):
-        nonlocal _stop
-        log.info("recibida senal %s, terminando limpio", signum)
-        _stop = True
-
-    signal.signal(signal.SIGTERM, _on_sig)
-    signal.signal(signal.SIGINT, _on_sig)
-
-    while not _stop:
-        try:
-            summary = run_once(max_attempts=max_attempts)
-            if summary["total"] > 0:
-                log.info("ciclo: %s", summary)
-        except Exception:
-            log.exception("error fatal en ciclo, continuo igualmente")
-
-        for _ in range(interval):
-            if _stop:
-                break
-            time.sleep(1)
-
+    log.info("felisa daemon iniciado")
+    asyncio.run(_run_async(interval=interval, max_attempts=max_attempts))
     log.info("felisa daemon shutdown completo")
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="felisa-daemon")
     parser.add_argument("--interval", type=int, default=DEFAULT_INTERVAL_SECONDS,
-                        help="segundos entre ciclos (default 60)")
+                        help="segundos entre ciclos de la cola (default 60)")
     parser.add_argument("--max-attempts", type=int, default=DEFAULT_MAX_ATTEMPTS)
-    parser.add_argument("--once", action="store_true", help="procesar una vuelta y salir")
+    parser.add_argument("--once", action="store_true",
+                        help="procesar una vuelta de la cola y salir (sin Telegram)")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
 

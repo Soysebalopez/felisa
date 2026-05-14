@@ -18,8 +18,8 @@ Numeradas en el documento de diseño. Cada fase corresponde a un milestone en Li
 |------|----------|------------------|
 | 1 | Core: daemon + Postgres + `mem` desde terminal | Fase 1 — Core (100%) |
 | 2 | Agente conversacional `felisa` | Fase 2 — Agente conversacional (100%) |
-| 3 | MCP custom (FastAPI en Railway) + integracion Claude.ai | en curso |
-| 4 | Telegram bot + Whisper para voz | pendiente |
+| 3 | MCP custom (FastAPI en Railway) + integracion Claude.ai | Fase 3 — MCP (100%) |
+| 4 | Telegram bot + Whisper para voz | Fase 4 — Telegram + Whisper (100%) |
 | 5 | Deteccion automatica de patrones | pendiente |
 | 6 | Weekly synthesis con cruce de proyectos | pendiente |
 | 7 | Hook de Claude Code para captura automatica | pendiente |
@@ -60,16 +60,21 @@ felisa/
     mem.py             # comando `mem` (captura/buscar/listar/cola)
     felisa.py          # comando `felisa` (loop + one-shot)
   daemon/
-    main.py            # daemon background (LaunchAgent)
+    main.py            # daemon background (drainer + bot Telegram, asyncio)
   mcp/
-    server.py          # MCP server con tools (Fase 3 — en curso)
+    server.py          # MCP server con tools (Fase 3, deploy Railway)
+    oauth_provider.py
+  telegram/
+    api.py             # cliente HTTP minimal a la Bot API (httpx async)
+    bot.py             # TelegramBot: long polling + filtro chat_id + pipeline
+    whisper.py         # transcribe(audio_bytes, mime) via Groq Whisper
 sql/
   001_init.sql         # schema spaces + memories + pgvector + HNSW
 scripts/
   com.felisa.daemon.plist
   install-daemon.sh
   uninstall-daemon.sh
-tests/                 # 61 tests, todos verde
+tests/                 # 82 tests, todos verde
 ```
 
 ## Credenciales
@@ -161,9 +166,10 @@ loop cada 60s
 
 - **Fase 1 completa** (commit `062a268`): captura sincrona con `mem`, daemon corriendo como LaunchAgent retrying la cola offline, 37 tests
 - **Fase 2 completa** (commit `ee90294`): agente `felisa` con tool use sobre 8 tools (CRUD spaces + search/list), 24 tests nuevos
-- **Fase 3 en curso**: MCP server custom para que claude.ai lea memoria automaticamente
+- **Fase 3 completa** (commit `6611621`): MCP server custom desplegado en Railway con OAuth, claude.ai consulta memoria automaticamente
+- **Fase 4 completa**: bot Telegram con long polling + Groq Whisper, integrado al daemon como tarea async. Captura desde el movil (texto y voz). 21 tests nuevos.
 
-Tests totales: 61 pasando. DB en Railway: 3 espacios (global/whitebay/simplistic) + 2 memorias reales.
+Tests totales: 82 pasando. DB en Railway: 3 espacios (global/whitebay/simplistic).
 
 ## Comandos utiles
 
@@ -175,8 +181,12 @@ mem cola                        # ver pendientes en cola offline
 
 felisa                          # loop conversacional persistente
 felisa "mensaje"                # one-shot
-felisa-daemon --once            # drenar cola manualmente
-felisa-daemon                   # daemon en foreground (debug)
+felisa-daemon --once            # drenar cola manualmente (sin Telegram)
+felisa-daemon                   # daemon en foreground: cola + bot Telegram
+felisa-daemon -v                # con logs a stderr ademas de daemon.log
+
+# Reiniciar el LaunchAgent despues de cambiar el codigo:
+launchctl kickstart -k "gui/$(id -u)/com.felisa.daemon"
 
 scripts/install-daemon.sh       # (re)instalar LaunchAgent
 scripts/uninstall-daemon.sh
