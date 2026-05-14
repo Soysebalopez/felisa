@@ -20,6 +20,7 @@ import asyncio
 import contextlib
 import logging
 import logging.handlers
+import re
 import signal
 import sys
 from pathlib import Path
@@ -39,21 +40,43 @@ LOG_PATH = Path.home() / ".felisa" / "daemon.log"
 
 log = logging.getLogger("felisa.daemon")
 
+# httpx loguea cada request con el URL completo, y la Bot API de Telegram lleva el
+# token embebido en el path (`/bot<token>/method`). Sin redaccion, daemon.log
+# guarda el token en cleartext en cada poll cycle.
+_TELEGRAM_TOKEN_RE = re.compile(r"/bot(\d+:[A-Za-z0-9_-]+)")
+
+
+class _RedactTelegramToken(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        # Interpolamos msg % args ahora (httpx pasa la URL como objeto, no como str,
+        # asi que el sub no la alcanzaria sin invocar __str__). Despues vaciamos args
+        # para que el formatter no vuelva a hacer % y rompa.
+        try:
+            text = record.getMessage()
+        except Exception:
+            return True
+        record.msg = _TELEGRAM_TOKEN_RE.sub("/bot[REDACTED]", text)
+        record.args = ()
+        return True
+
 
 def _setup_logging(verbose: bool = False) -> None:
     LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    redact = _RedactTelegramToken()
     handler = logging.handlers.RotatingFileHandler(
         LOG_PATH, maxBytes=5_000_000, backupCount=3, encoding="utf-8"
     )
     handler.setFormatter(
         logging.Formatter("%(asctime)s %(levelname)s %(name)s | %(message)s")
     )
+    handler.addFilter(redact)
     root = logging.getLogger()
     root.setLevel(logging.DEBUG if verbose else logging.INFO)
     root.addHandler(handler)
     if verbose:
         stream = logging.StreamHandler(sys.stderr)
         stream.setFormatter(logging.Formatter("%(levelname)s %(name)s | %(message)s"))
+        stream.addFilter(redact)
         root.addHandler(stream)
 
 

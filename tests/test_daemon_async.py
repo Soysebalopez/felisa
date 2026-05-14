@@ -6,10 +6,53 @@ Mockean ambas coroutines para no levantar pipeline / Telegram reales.
 from __future__ import annotations
 
 import asyncio
+import logging
 
 import pytest
 
 from felisa.daemon import main as daemon
+
+
+def test_redact_telegram_token_in_msg() -> None:
+    f = daemon._RedactTelegramToken()
+    record = logging.LogRecord(
+        name="httpx", level=logging.INFO, pathname="", lineno=0,
+        msg="POST https://api.telegram.org/bot12345:AAHfake-token_XYZ/getUpdates",
+        args=(), exc_info=None,
+    )
+    assert f.filter(record) is True
+    assert "12345:AAHfake-token_XYZ" not in record.msg
+    assert "/bot[REDACTED]/getUpdates" in record.msg
+
+
+def test_redact_telegram_token_with_url_object() -> None:
+    """httpx pasa httpx.URL como arg — debe redactarse via __str__ tambien."""
+    class _FakeURL:
+        def __str__(self) -> str:
+            return "https://api.telegram.org/bot9:secret-Token_AB/getMe"
+
+    f = daemon._RedactTelegramToken()
+    record = logging.LogRecord(
+        name="httpx", level=logging.INFO, pathname="", lineno=0,
+        msg="HTTP Request: %s %s",
+        args=("POST", _FakeURL()),
+        exc_info=None,
+    )
+    assert f.filter(record) is True
+    final = record.getMessage()
+    assert "secret-Token_AB" not in final
+    assert "/bot[REDACTED]/getMe" in final
+
+
+def test_redact_passes_through_non_telegram_urls() -> None:
+    f = daemon._RedactTelegramToken()
+    record = logging.LogRecord(
+        name="x", level=logging.INFO, pathname="", lineno=0,
+        msg="POST https://api.anthropic.com/v1/messages",
+        args=(), exc_info=None,
+    )
+    f.filter(record)
+    assert record.msg == "POST https://api.anthropic.com/v1/messages"
 
 
 async def test_run_async_drainer_failure_propagates(monkeypatch: pytest.MonkeyPatch) -> None:
