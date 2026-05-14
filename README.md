@@ -13,6 +13,7 @@ Haiku, y los hace consultables desde cualquier conversación de Claude.
 - **`felisa`** — agente conversacional con tools (`save_memory`, `search_memories`, `list_spaces`, ...).
 - **Bot de Telegram** — manda texto o voz desde el celular; transcribe con Whisper, agente decide qué hacer.
 - **MCP en claude.ai** — Claude consulta tu memoria al inicio de cada chat (transparente).
+- **MCP en Claude Code** — el CLI de Claude lee tu memoria en cualquier sesión, en cualquier repo.
 
 ## Stack
 

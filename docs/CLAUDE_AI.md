@@ -97,3 +97,51 @@ Verificá que la DB tenga datos: `psql $DATABASE_URL -c "select count(*) from me
 **Quiero borrar la integración**
 
 claude.ai → Settings → Integrations → tu integración → Remove. Después en Railway podés borrar el servicio.
+
+---
+
+## Claude Code (CLI en terminal)
+
+Si usás [Claude Code](https://claude.com/claude-code) en terminal, podés conectar tu MCP de Felisa para que cada sesión nueva tenga acceso a tu memoria.
+
+### 1. Registrar el MCP
+
+```bash
+claude mcp add --transport http --scope user felisa https://TU-URL.up.railway.app/mcp
+```
+
+Reemplazá `TU-URL.up.railway.app` con la URL pública de tu deploy de Railway.
+
+### 2. Autenticar
+
+Adentro de una sesión de Claude Code, mandá:
+
+```
+/mcp
+```
+
+Te va a guiar por el flujo OAuth: te pide tu `FELISA_API_TOKEN`, lo pega contra el `/login` del MCP, y mantiene la sesión.
+
+### 3. Que Claude use la memoria en cada sesión
+
+Agregá este bloque a tu `~/.claude/CLAUDE.md` (instrucciones globales que Claude Code lee siempre):
+
+```markdown
+## Felisa memory (MCP)
+- Si el MCP `felisa` está disponible en la sesión, consultalo al inicio para tener mi contexto: usá `list_recent_memories` para overview y `search_memories` cuando el tema lo amerite (proyectos, decisiones técnicas, patrones, modo de trabajo).
+- Solo usá `create_memory` cuando lo pida explícitamente ("recordá esto", "guardá que", "anotá") — no guardes por iniciativa propia.
+- Setup: `claude mcp add --transport http --scope user felisa https://TU-URL.up.railway.app/mcp` y autenticar con `/mcp` dentro de Claude Code (OAuth con `FELISA_API_TOKEN`).
+```
+
+Con eso, cualquier sesión de Claude Code (cualquier proyecto) tiene tu memoria de fondo. El bloque vive en tu `CLAUDE.md` personal global; no se commitea con el código del proyecto.
+
+### Diferencia con claude.ai
+
+| | claude.ai (web/app) | Claude Code (CLI terminal) |
+|---|---|---|
+| Setup | UI: Settings → Integrations | comando `claude mcp add` |
+| Auth | UI redirige al login del MCP | `/mcp` adentro de la sesión |
+| Instrucciones de uso | Settings → Profile | `~/.claude/CLAUDE.md` |
+| Contexto que ve | Toda la conversación + tu memoria | El repo + tu memoria |
+
+Ambos comparten el mismo MCP server. Si autenticás en los dos, ambos consultan la misma DB.

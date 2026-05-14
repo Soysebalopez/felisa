@@ -448,10 +448,11 @@ def main() -> int:
 
     print(_c("1;32", "\n  ✓ Listo.\n"))
     print("  Proximos pasos:")
-    print("    · CLI:        mem \"tu primera memoria\"")
-    print("    · Agente:     felisa")
-    print("    · Telegram:   mandate un mensaje al bot que creaste")
-    print("    · claude.ai:  ver docs/CLAUDE_AI.md para conectar el MCP\n")
+    print("    · CLI:           mem \"tu primera memoria\"")
+    print("    · Agente:        felisa")
+    print("    · Telegram:      mandate un mensaje al bot que creaste")
+    print("    · claude.ai:     docs/CLAUDE_AI.md (deploy del MCP + integration)")
+    print("    · Claude Code:   docs/CLAUDE_AI.md (`claude mcp add ... + bloque en ~/.claude/CLAUDE.md`)\n")
     return 0
 
 
