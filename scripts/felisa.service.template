@@ -1,0 +1,19 @@
+[Unit]
+Description=Felisa daemon — captura de memorias + bot Telegram
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory={WORKING_DIRECTORY}
+ExecStart={UV_PATH} run felisa-daemon
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:%h/.felisa/daemon.stdout.log
+StandardError=append:%h/.felisa/daemon.stderr.log
+
+# Carga del .env.local para credenciales y DATABASE_URL.
+EnvironmentFile=-{WORKING_DIRECTORY}/.env.local
+
+[Install]
+WantedBy=default.target

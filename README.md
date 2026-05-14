@@ -24,7 +24,7 @@ Haiku, y los hace consultables desde cualquier conversación de Claude.
 | Embeddings | Cloudflare Workers AI (`bge-small-en-v1.5`, 384 dim) |
 | Voz | Groq Whisper (`whisper-large-v3`) |
 | Agente | Claude Sonnet 4.6 con tool use |
-| Daemon | LaunchAgent (macOS) / systemd (Linux, en progreso) |
+| Daemon | LaunchAgent (macOS) / systemd --user (Linux) |
 
 ## Quickstart
 

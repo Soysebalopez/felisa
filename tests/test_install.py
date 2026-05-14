@@ -181,3 +181,32 @@ def test_ask_secret_uses_getpass(install_mod) -> None:
 def test_os_flags_are_mutually_exclusive(install_mod) -> None:
     """Solo un IS_MAC o IS_LINUX puede ser True en una corrida."""
     assert not (install_mod.IS_MAC and install_mod.IS_LINUX)
+
+
+# ── systemd template render ───────────────────────────────────────────────
+
+
+def test_systemd_template_exists_and_has_placeholders() -> None:
+    """El template tiene los placeholders que install.py espera reemplazar."""
+    template = REPO_ROOT / "scripts" / "felisa.service.template"
+    assert template.exists(), "scripts/felisa.service.template debe existir"
+    content = template.read_text()
+    assert "{WORKING_DIRECTORY}" in content
+    assert "{UV_PATH}" in content
+    assert "WantedBy=default.target" in content  # systemd --user idiom
+
+
+def test_systemd_template_renders_without_braces_leftover() -> None:
+    """Cuando install.py renderiza, no quedan placeholders sin sustituir."""
+    template = REPO_ROOT / "scripts" / "felisa.service.template"
+    rendered = (
+        template.read_text()
+        .replace("{WORKING_DIRECTORY}", "/home/test/felisa")
+        .replace("{UV_PATH}", "/usr/local/bin/uv")
+    )
+    # No deberian quedar placeholders {WORKING_DIRECTORY} ni {UV_PATH}.
+    assert "{WORKING_DIRECTORY}" not in rendered
+    assert "{UV_PATH}" not in rendered
+    # Y los valores reales deben aparecer.
+    assert "/home/test/felisa" in rendered
+    assert "/usr/local/bin/uv" in rendered

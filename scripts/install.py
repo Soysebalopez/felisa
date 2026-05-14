@@ -100,8 +100,12 @@ def check_dependencies() -> None:
         err("`security` (Keychain) no esta — necesario en macOS")
         missing.append("security")
 
-    if IS_LINUX and not shutil.which("keyring"):
-        warn("`keyring` Python no encontrado. Se usara .env.local como fallback.")
+    if IS_LINUX:
+        try:
+            import keyring  # noqa: F401
+            ok("keyring (Python) disponible")
+        except ImportError:
+            warn("paquete `keyring` no encontrado. Se va a usar .env.local como fallback.")
 
     if missing:
         sys.exit(1)
@@ -162,21 +166,38 @@ CREDENTIALS = [
 
 
 def _keychain_has(slot: str) -> bool:
-    if not IS_MAC:
-        return False
-    r = subprocess.run(
-        ["security", "find-generic-password", "-s", slot, "-a", "felisa"],
-        capture_output=True,
-    )
-    return r.returncode == 0
+    if IS_MAC:
+        r = subprocess.run(
+            ["security", "find-generic-password", "-s", slot, "-a", "felisa"],
+            capture_output=True,
+        )
+        return r.returncode == 0
+    if IS_LINUX:
+        try:
+            import keyring
+            return keyring.get_password(slot, "felisa") is not None
+        except ImportError:
+            return False
+    return False
 
 
 def _keychain_set(slot: str, value: str) -> None:
-    subprocess.run(
-        ["security", "add-generic-password", "-U",
-         "-s", slot, "-a", "felisa", "-w", value],
-        check=True,
-    )
+    if IS_MAC:
+        subprocess.run(
+            ["security", "add-generic-password", "-U",
+             "-s", slot, "-a", "felisa", "-w", value],
+            check=True,
+        )
+        return
+    if IS_LINUX:
+        try:
+            import keyring
+            keyring.set_password(slot, "felisa", value)
+            return
+        except ImportError:
+            pass
+    # Fallback final: env.local (Linux sin keyring, u OS desconocido).
+    raise RuntimeError("No hay backend de credenciales — usa _env_local_set")
 
 
 def _env_local_set(key: str, value: str) -> None:
@@ -190,13 +211,29 @@ def _env_local_set(key: str, value: str) -> None:
     ENV_LOCAL.chmod(0o600)
 
 
-def store_credential(cred: dict, value: str) -> None:
+def _have_keyring() -> bool:
     if IS_MAC:
-        _keychain_set(cred["slot"], value)
-        ok(f"{cred['name']} → Keychain ({cred['slot']})")
-    else:
-        _env_local_set(cred["env"], value)
-        ok(f"{cred['name']} → {ENV_LOCAL.name} ({cred['env']})")
+        return True
+    if IS_LINUX:
+        try:
+            import keyring  # noqa: F401
+            return True
+        except ImportError:
+            return False
+    return False
+
+
+def store_credential(cred: dict, value: str) -> None:
+    if _have_keyring():
+        try:
+            _keychain_set(cred["slot"], value)
+            backend = "Keychain" if IS_MAC else "keyring"
+            ok(f"{cred['name']} → {backend} ({cred['slot']})")
+            return
+        except Exception as exc:
+            warn(f"backend de credenciales fallo ({exc}); usando .env.local")
+    _env_local_set(cred["env"], value)
+    ok(f"{cred['name']} → {ENV_LOCAL.name} ({cred['env']})")
 
 
 def collect_credentials() -> None:
@@ -319,10 +356,51 @@ def install_daemon() -> None:
         subprocess.run(["bash", str(installer)], check=True)
         ok("LaunchAgent instalado.")
     elif IS_LINUX:
-        warn("Linux: el unit systemd se genera en scripts/felisa.service (TODO).")
-        warn("Por ahora corre manual: `uv run felisa-daemon`")
+        if not ask_yn("¿Instalar systemd user unit (daemon arranca con tu sesion)?", default=True):
+            warn("Salteado. Para arrancar manualmente: `uv run felisa-daemon`")
+            return
+        _install_systemd_unit()
     else:
         warn(f"OS no soportado para daemon automatico: {platform.system()}")
+
+
+def _install_systemd_unit() -> None:
+    template_path = REPO_ROOT / "scripts" / "felisa.service.template"
+    if not template_path.exists():
+        warn(f"No existe {template_path}. Salteando.")
+        return
+    uv_path = shutil.which("uv")
+    if not uv_path:
+        err("uv no esta en PATH — necesario para el ExecStart del unit.")
+        return
+
+    rendered = (
+        template_path.read_text(encoding="utf-8")
+        .replace("{WORKING_DIRECTORY}", str(REPO_ROOT))
+        .replace("{UV_PATH}", uv_path)
+    )
+
+    unit_dir = Path.home() / ".config" / "systemd" / "user"
+    unit_dir.mkdir(parents=True, exist_ok=True)
+    unit_path = unit_dir / "felisa.service"
+    unit_path.write_text(rendered, encoding="utf-8")
+    ok(f"Unit escrito en {unit_path}")
+
+    print("  Para activarlo:")
+    print("    systemctl --user daemon-reload")
+    print("    systemctl --user enable --now felisa.service")
+    print("    journalctl --user -fu felisa.service  # ver logs")
+
+    if ask_yn("¿Lo activo ahora?", default=True):
+        try:
+            subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
+            subprocess.run(
+                ["systemctl", "--user", "enable", "--now", "felisa.service"],
+                check=True,
+            )
+            ok("Daemon activo (systemctl --user status felisa para verificar)")
+        except subprocess.CalledProcessError as exc:
+            err(f"systemctl fallo: {exc}. Probalo a mano con los comandos de arriba.")
 
 
 # ── Step 7: smoke test ────────────────────────────────────────────────────

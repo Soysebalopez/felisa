@@ -11,6 +11,9 @@ versioning en [SemVer](https://semver.org/spec/v2.0.0.html).
 - LICENSE (MIT) + CONTRIBUTING.
 - GitHub Actions CI: tests + ruff en cada PR.
 - Soporte de prompts personalizados via `~/.felisa/prompts/{structure,agent}.md`.
+- **Soporte Linux completo**: `config.py` lee credenciales via `keyring` package
+  (Secret Service / KWallet / fallback). `install.py` genera y activa systemd
+  user unit (`~/.config/systemd/user/felisa.service`).
 
 ### Changed
 - `Agent.user_name` ahora lee `FELISA_USER_NAME` env var (default "el usuario").

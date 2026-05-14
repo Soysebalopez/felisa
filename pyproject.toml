@@ -14,6 +14,9 @@ dependencies = [
     "mcp[cli]>=1.12",
     "uvicorn>=0.30",
     "starlette>=0.40",
+    # Linux usa keyring para credenciales (Secret Service / KWallet / encrypted file).
+    # macOS usa el binario `security` directo (mas rapido, ya disponible).
+    "keyring>=25; sys_platform == 'linux'",
 ]
 
 [project.scripts]
