@@ -17,6 +17,25 @@ from unittest.mock import MagicMock
 import pytest
 
 from felisa.core import agent, db
+from felisa.core.config import MissingCredential
+
+
+def _have_integration_deps() -> bool:
+    """El agente integra DB + Anthropic. Sin alguno, skipear."""
+    try:
+        db.list_spaces()
+        from felisa.core.config import get_anthropic_key
+        get_anthropic_key()
+        return True
+    except (MissingCredential, Exception):
+        return False
+
+
+pytestmark = pytest.mark.skipif(
+    not _have_integration_deps(),
+    reason="DATABASE_URL + ANTHROPIC_API_KEY requeridas (esperado en CI sin creds)",
+)
+
 
 # ---- tests de execute_tool ------------------------------------------------
 
