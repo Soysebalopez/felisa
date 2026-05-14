@@ -43,6 +43,7 @@ from starlette.routing import Mount
 
 from felisa.core import db, embeddings, pipeline
 from felisa.core.structuring import StructuringError
+from felisa.mcp import oauth_storage
 from felisa.mcp.oauth_provider import MCP_SCOPE, FelisaOAuthProvider
 
 log = logging.getLogger("felisa.mcp")
@@ -261,6 +262,10 @@ async def root(request: Request) -> HTMLResponse:
 
 @contextlib.asynccontextmanager
 async def _lifespan(app: Starlette):
+    try:
+        oauth_storage.init_oauth_tables()
+    except Exception:
+        log.exception("init_oauth_tables fallo; tokens no van a sobrevivir redeploys")
     async with mcp.session_manager.run():
         yield
 

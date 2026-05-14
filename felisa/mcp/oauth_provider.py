@@ -4,9 +4,10 @@ Adaptado del `SimpleOAuthProvider` del MCP SDK. Usa `FELISA_API_TOKEN` como
 password unico para autenticar al humano. Permite Dynamic Client Registration
 (claude.ai genera su client_id al primer contacto).
 
-Storage in-memory para v1: clientes y tokens viven en memoria. En cada redeploy
-de Railway claude.ai re-registra y se re-autentica una vez. Si la fricción
-molesta, agregar persistencia a Postgres en una iteracion posterior.
+Storage: clientes y access tokens en Postgres (tablas `oauth_clients` y
+`oauth_tokens`). Los `auth_codes` y `state_mapping` viven en memoria — tienen
+TTL <5min y solo importan durante un handshake; si el server reinicia en medio
+el usuario reintenta.
 """
 
 from __future__ import annotations
@@ -30,6 +31,8 @@ from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
 
+from felisa.mcp import oauth_storage
+
 
 MCP_SCOPE = "user"
 CODE_TTL_SECONDS = 300
@@ -48,9 +51,8 @@ class FelisaOAuthProvider(
     def __init__(self, *, auth_callback_url: str, server_url: str):
         self.auth_callback_url = auth_callback_url
         self.server_url = server_url.rstrip("/")
-        self.clients: dict[str, OAuthClientInformationFull] = {}
+        # auth_codes y state_mapping son efimeros (handshake en curso).
         self.auth_codes: dict[str, AuthorizationCode] = {}
-        self.tokens: dict[str, AccessToken] = {}
         self.state_mapping: dict[str, dict[str, Any]] = {}
 
     def _felisa_token(self) -> str:
@@ -60,12 +62,12 @@ class FelisaOAuthProvider(
         return expected
 
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
-        return self.clients.get(client_id)
+        return oauth_storage.load_client(client_id)
 
     async def register_client(self, client_info: OAuthClientInformationFull) -> None:
         if not client_info.client_id:
             raise ValueError("No client_id provided")
-        self.clients[client_info.client_id] = client_info
+        oauth_storage.save_client(client_info)
 
     async def authorize(
         self,
@@ -181,13 +183,14 @@ class FelisaOAuthProvider(
             raise ValueError("No client_id provided")
 
         mcp_token = f"mcp_{secrets.token_hex(32)}"
-        self.tokens[mcp_token] = AccessToken(
+        access = AccessToken(
             token=mcp_token,
             client_id=client.client_id,
             scopes=authorization_code.scopes,
             expires_at=int(time.time()) + TOKEN_TTL_SECONDS,
             resource=authorization_code.resource,
         )
+        oauth_storage.save_token(access)
         del self.auth_codes[authorization_code.code]
         return OAuthToken(
             access_token=mcp_token,
@@ -197,11 +200,11 @@ class FelisaOAuthProvider(
         )
 
     async def load_access_token(self, token: str) -> AccessToken | None:
-        access_token = self.tokens.get(token)
+        access_token = oauth_storage.load_token(token)
         if not access_token:
             return None
         if access_token.expires_at and access_token.expires_at < time.time():
-            del self.tokens[token]
+            oauth_storage.delete_token(token)
             return None
         return access_token
 
@@ -221,5 +224,5 @@ class FelisaOAuthProvider(
         raise NotImplementedError("Refresh tokens no soportados en v1")
 
     async def revoke_token(self, token: AccessToken | RefreshToken) -> None:
-        if isinstance(token, AccessToken) and token.token in self.tokens:
-            del self.tokens[token.token]
+        if isinstance(token, AccessToken):
+            oauth_storage.delete_token(token.token)
