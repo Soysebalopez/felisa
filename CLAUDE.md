@@ -18,7 +18,7 @@ Numeradas en el documento de diseño. Cada fase corresponde a un milestone en Li
 |------|----------|------------------|
 | 1 | Core: daemon + Postgres + `mem` desde terminal | Fase 1 — Core (100%) |
 | 2 | Agente conversacional `felisa` | Fase 2 — Agente conversacional (100%) |
-| 3 | MCP custom (FastAPI en Railway) + integracion Claude.ai | Fase 3 — MCP (100%) |
+| 3 | MCP custom (FastAPI en Railway) + integracion Claude.ai. 5 tools: search/list_recent/list_spaces/count + create_memory. OAuth persistido en Postgres. | Fase 3 — MCP (100%) |
 | 4 | Telegram bot + Whisper para voz | Fase 4 — Telegram + Whisper (100%) |
 | 5 | Deteccion automatica de patrones | pendiente |
 | 6 | Weekly synthesis con cruce de proyectos | pendiente |
@@ -62,19 +62,21 @@ felisa/
   daemon/
     main.py            # daemon background (drainer + bot Telegram, asyncio)
   mcp/
-    server.py          # MCP server con tools (Fase 3, deploy Railway)
-    oauth_provider.py
+    server.py          # MCP server con 5 tools (Fase 3, deploy Railway)
+    oauth_provider.py  # OAuth 2.1 + DCR embedded
+    oauth_storage.py   # persistencia de clients/tokens en Postgres
   telegram/
     api.py             # cliente HTTP minimal a la Bot API (httpx async)
     bot.py             # TelegramBot: long polling + filtro chat_id + pipeline
     whisper.py         # transcribe(audio_bytes, mime) via Groq Whisper
 sql/
   001_init.sql         # schema spaces + memories + pgvector + HNSW
+  002_oauth_tokens.sql # tablas oauth_clients + oauth_tokens (init en boot)
 scripts/
   com.felisa.daemon.plist
   install-daemon.sh
   uninstall-daemon.sh
-tests/                 # 82 tests, todos verde
+tests/                 # 103 tests pasando con DATABASE_URL exportada
 ```
 
 ## Credenciales
@@ -107,8 +109,25 @@ def read_keychain(service: str, account: str = "felisa") -> str:
 - Environment: `production`
 - Servicio Postgres: `Postgres` — provee `DATABASE_URL` (interna) y `DATABASE_PUBLIC_URL` (externa para dev local)
 - pgvector 0.8.2 instalado
-- Tablas: `spaces`, `memories` (con indice ivfflat sobre `embedding`)
+- Tablas: `spaces`, `memories` (con indice ivfflat sobre `embedding`), `oauth_clients`, `oauth_tokens`
 - Seeds: `global` (es_global=true), `whitebay`, `simplistic`
+
+Servicio `felisa-mcp` — env vars requeridas (mantener sincronizadas con `_KEYCHAIN_TO_ENV` en `config.py`):
+
+| Env var | Slot Keychain |
+|---------|---------------|
+| `DATABASE_URL` | (referencia al servicio Postgres) |
+| `ANTHROPIC_API_KEY` | `felisa-anthropic-key` |
+| `CLOUDFLARE_ACCOUNT_ID` | `felisa-cf-account-id` |
+| `CLOUDFLARE_API_TOKEN` | `felisa-cf-token` |
+| `FELISA_API_TOKEN` | `felisa-mcp-token` |
+| `MCP_PUBLIC_URL` | (URL publica del servicio) |
+
+Para setear una env var desde Keychain sin que la key quede en el shell history:
+```bash
+KEY=$(security find-generic-password -s <slot> -a felisa -w) \
+  && railway variables --service felisa-mcp --set "<ENV_VAR>=$KEY"
+```
 
 Conexion local para desarrollo:
 ```bash
@@ -168,8 +187,9 @@ loop cada 60s
 - **Fase 2 completa** (commit `ee90294`): agente `felisa` con tool use sobre 8 tools (CRUD spaces + search/list), 24 tests nuevos
 - **Fase 3 completa** (commit `6611621`): MCP server custom desplegado en Railway con OAuth, claude.ai consulta memoria automaticamente
 - **Fase 4 completa**: bot Telegram con long polling + Groq Whisper, integrado al daemon como tarea async. Captura desde el movil (texto y voz). 21 tests nuevos.
+- **Post-Fase 3 (commits `ca502fd` + `986b510` + `bdc92d6`)**: MCP soporta escritura (`create_memory` reusa `pipeline.process`), y OAuth clients/tokens persisten en tablas `oauth_clients`/`oauth_tokens` — sobreviven redeploys de Railway. 12 tests nuevos.
 
-Tests totales: 82 pasando. DB en Railway: 3 espacios (global/whitebay/simplistic).
+Tests totales: 103 pasando (con `DATABASE_URL` exportada). DB en Railway: 3 espacios (global/whitebay/simplistic).
 
 ## Comandos utiles
 
