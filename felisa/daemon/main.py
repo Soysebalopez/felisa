@@ -26,6 +26,7 @@ import sys
 from pathlib import Path
 
 from felisa.core import config, pipeline, queue
+from felisa.core.agent import Agent
 from felisa.core.config import MissingCredential
 from felisa.core.embeddings import EmbeddingUnavailable
 from felisa.core.queue import QueueItem
@@ -175,8 +176,11 @@ async def _telegram_loop() -> None:
         log.warning("groq no disponible: voz desactivada, texto sigue funcionando")
         transcribe_fn = None
 
+    agent = Agent()
     async with TelegramAPI(token) as api:
-        bot = TelegramBot(api, chat_id=chat_id, transcribe=transcribe_fn)
+        bot = TelegramBot(
+            api, chat_id=chat_id, agent=agent, transcribe=transcribe_fn,
+        )
         await bot.run()
 
 

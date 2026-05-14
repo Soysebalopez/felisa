@@ -11,11 +11,13 @@ para que el daemon caiga y LaunchAgent lo relance.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from pathlib import Path
 from typing import Awaitable, Callable
 
 from felisa.core import pipeline, queue
+from felisa.core.agent import Agent
 from felisa.core.embeddings import EmbeddingUnavailable
 from felisa.core.queue import QueueItem
 from felisa.core.structuring import StructuringError
@@ -27,6 +29,7 @@ log = logging.getLogger(__name__)
 OFFSET_PATH = Path.home() / ".felisa" / "telegram_offset"
 ALLOWED_UPDATES = ["message"]
 BACKOFF_SEQUENCE = (1, 2, 5, 15, 30)
+TYPING_INTERVAL = 4.0
 
 # Funcion que toma (bytes, mime) y devuelve transcript. Inyectada por el
 # daemon cuando whisper.py este disponible (WHI-682).
@@ -39,11 +42,13 @@ class TelegramBot:
         api: TelegramAPI,
         *,
         chat_id: int,
+        agent: Agent | None = None,
         transcribe: TranscribeFn | None = None,
         offset_path: Path = OFFSET_PATH,
     ) -> None:
         self._api = api
         self._chat_id = chat_id
+        self._agent = agent
         self._transcribe = transcribe
         self._offset_path = offset_path
         self._offset: int | None = self._load_offset()
@@ -118,7 +123,10 @@ class TelegramBot:
         texto = texto.strip()
         if not texto:
             return
-        await self._process_and_confirm(texto)
+        if self._agent is not None:
+            await self._chat_with_agent(texto)
+        else:
+            await self._process_and_confirm(texto)
 
     async def _handle_voice(self, voice: dict) -> None:
         if self._transcribe is None:
@@ -156,7 +164,56 @@ class TelegramBot:
             await self._reply("La transcripcion vino vacia.")
             return
 
-        await self._process_and_confirm(transcript, voz=True)
+        if self._agent is not None:
+            await self._chat_with_agent(transcript, voz=True)
+        else:
+            await self._process_and_confirm(transcript, voz=True)
+
+    async def _chat_with_agent(self, texto: str, *, voz: bool = False) -> None:
+        """Pasa el mensaje al agente y manda la respuesta final al usuario.
+
+        Si la respuesta de Telegram va a tardar (Sonnet + tool use puede tomar
+        varios segundos), corremos un loop de `sendChatAction(typing)` en
+        paralelo para que el usuario vea "escribiendo...".
+        """
+        assert self._agent is not None
+        typing_task = asyncio.create_task(self._typing_loop())
+        try:
+            reply = await asyncio.to_thread(self._agent.chat, texto)
+        except (EmbeddingUnavailable, StructuringError) as exc:
+            log.info("agente: tool recuperable fallo (%s), encolando texto crudo", exc)
+            queue.enqueue(QueueItem(texto=texto))
+            await self._reply("No pude procesar ahora (lo encole para reintento).")
+            return
+        except Exception as exc:
+            log.exception("agente fallo: %s", exc)
+            await self._reply("No pude responder (error inesperado).")
+            return
+        finally:
+            typing_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await typing_task
+
+        if not reply.strip():
+            log.warning("agente devolvio respuesta vacia")
+            return
+
+        if voz and len(texto) > 0:
+            reply = f"{reply}\n\n_{texto[:80].strip()}_"
+            await self._reply(reply, parse_mode="Markdown")
+        else:
+            await self._reply(reply)
+
+    async def _typing_loop(self) -> None:
+        try:
+            while True:
+                with contextlib.suppress(
+                    TelegramUnavailable, TelegramAuthError, RateLimited,
+                ):
+                    await self._api.send_chat_action(chat_id=self._chat_id, action="typing")
+                await asyncio.sleep(TYPING_INTERVAL)
+        except asyncio.CancelledError:
+            raise
 
     async def _process_and_confirm(self, texto: str, *, voz: bool = False) -> None:
         try:

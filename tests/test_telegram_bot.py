@@ -87,11 +87,38 @@ class FakeAPI:
         self.sent.append({"chat_id": chat_id, "text": text, "parse_mode": parse_mode})
         return {"message_id": len(self.sent)}
 
+    async def send_chat_action(self, *, chat_id, action="typing"):
+        if not hasattr(self, "actions"):
+            self.actions = []
+        self.actions.append({"chat_id": chat_id, "action": action})
+        return True
+
     async def get_file(self, file_id):
         return self.file_info
 
     async def download_file(self, file_path):
         return self.file_bytes
+
+
+class FakeAgent:
+    """Doble de felisa.core.agent.Agent para tests del flujo bot ↔ agente."""
+
+    def __init__(self, reply: str = "ok"):
+        self._reply = reply
+        self._exc: BaseException | None = None
+        self.calls: list[str] = []
+
+    def set_reply(self, reply: str) -> None:
+        self._reply = reply
+
+    def set_raise(self, exc: BaseException) -> None:
+        self._exc = exc
+
+    def chat(self, user_input: str) -> str:
+        self.calls.append(user_input)
+        if self._exc:
+            raise self._exc
+        return self._reply
 
 
 async def _run_until_quiet(bot: TelegramBot, *, timeout: float = 0.5) -> None:
@@ -329,6 +356,91 @@ async def test_voice_without_transcribe_explains(
     assert called == []  # no se proceso pipeline
     assert len(api.sent) == 1
     assert "voz" in api.sent[0]["text"].lower()
+
+
+async def test_agent_handles_text_and_replies(
+    tmp_path: Path,
+) -> None:
+    api = FakeAPI()
+    api.queue_updates([_text_update(1, "que decisiones tengo sobre Felisa?")])
+    agent = FakeAgent(reply="Tenes 3 decisiones sobre Felisa: pgvector, Railway, fastmcp.")
+
+    bot = TelegramBot(api, chat_id=CHAT_ID, agent=agent, offset_path=tmp_path / "off")
+    await _run_until_quiet(bot)
+
+    assert agent.calls == ["que decisiones tengo sobre Felisa?"]
+    assert len(api.sent) == 1
+    assert "pgvector" in api.sent[0]["text"]
+
+
+async def test_agent_handles_voice_with_transcript(
+    tmp_path: Path,
+) -> None:
+    api = FakeAPI()
+    api.queue_updates([_voice_update(1)])
+
+    async def fake_transcribe(audio_bytes: bytes, mime: str) -> str:
+        return "decidi usar pgvector para Felisa"
+
+    agent = FakeAgent(reply="Guardado · decision_tecnica · whitebay")
+    bot = TelegramBot(
+        api, chat_id=CHAT_ID, agent=agent,
+        transcribe=fake_transcribe, offset_path=tmp_path / "off",
+    )
+    await _run_until_quiet(bot)
+
+    assert agent.calls == ["decidi usar pgvector para Felisa"]
+    assert len(api.sent) == 1
+    # Para voz se agrega preview en italica del transcript original
+    assert api.sent[0]["text"].startswith("Guardado · decision_tecnica · whitebay")
+    assert "_decidi usar pgvector" in api.sent[0]["text"]
+
+
+async def test_typing_action_sent_during_agent_call(
+    tmp_path: Path,
+) -> None:
+    api = FakeAPI()
+    api.queue_updates([_text_update(1, "hola")])
+
+    class SlowAgent(FakeAgent):
+        def chat(self, user_input):
+            # Simula latencia real del agente — duracion suficiente para varios typings.
+            import time
+            time.sleep(0.05)
+            return super().chat(user_input)
+
+    agent = SlowAgent(reply="hola que tal")
+
+    # Bajamos TYPING_INTERVAL para que el typing dispare durante el chat lento
+    import felisa.telegram.bot as bot_mod
+    original = bot_mod.TYPING_INTERVAL
+    bot_mod.TYPING_INTERVAL = 0.01
+    try:
+        bot = TelegramBot(api, chat_id=CHAT_ID, agent=agent, offset_path=tmp_path / "off")
+        await _run_until_quiet(bot)
+    finally:
+        bot_mod.TYPING_INTERVAL = original
+
+    assert getattr(api, "actions", []), "esperaba al menos una llamada a send_chat_action"
+    assert all(a["action"] == "typing" for a in api.actions)
+
+
+async def test_agent_recoverable_error_enqueues(
+    tmp_path: Path,
+) -> None:
+    from felisa.core.embeddings import EmbeddingUnavailable
+    api = FakeAPI()
+    api.queue_updates([_text_update(1, "cosa que falla")])
+    agent = FakeAgent()
+    agent.set_raise(EmbeddingUnavailable("cloudflare down"))
+
+    bot = TelegramBot(api, chat_id=CHAT_ID, agent=agent, offset_path=tmp_path / "off")
+    await _run_until_quiet(bot)
+
+    pending = queue.list_pending()
+    assert len(pending) == 1
+    assert pending[0].texto == "cosa que falla"
+    assert any("encole" in s["text"].lower() for s in api.sent)
 
 
 async def test_voice_with_transcribe_processes_text(

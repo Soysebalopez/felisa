@@ -115,6 +115,11 @@ class TelegramAPI:
             payload["parse_mode"] = parse_mode
         return await self._call("sendMessage", payload)
 
+    async def send_chat_action(
+        self, *, chat_id: int | str, action: str = "typing",
+    ) -> bool:
+        return await self._call("sendChatAction", {"chat_id": chat_id, "action": action})
+
     async def get_file(self, file_id: str) -> dict[str, Any]:
         return await self._call("getFile", {"file_id": file_id})
 

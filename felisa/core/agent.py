@@ -17,8 +17,10 @@ from typing import Any
 
 import anthropic
 
-from . import db, embeddings
+from . import db, embeddings, pipeline
 from .config import get_anthropic_key
+from .embeddings import EmbeddingUnavailable
+from .structuring import StructuringError
 
 MODEL = "claude-sonnet-4-6"
 MAX_TOKENS = 4096
@@ -123,6 +125,35 @@ TOOLS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "name": "save_memory",
+        "description": (
+            "Guarda el texto como una memoria nueva. Internamente Haiku clasifica el "
+            "tipo y espacio. Usar cuando el usuario dijo algo que claramente es una "
+            "memoria: una decision, un patron, una preferencia, un dato global, un "
+            "estado de proyecto. NO usar para saludos, preguntas ('que decisiones tengo'), "
+            "ni meta-conversacion. Si dudas, preguntale al usuario primero."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "texto": {
+                    "type": "string",
+                    "description": "El texto crudo a guardar. Pasalo tal como lo dijo el usuario o ligeramente limpio (no inventes contenido).",
+                },
+                "tipo_override": {
+                    "type": "string",
+                    "enum": ["decision_tecnica", "patron", "framework", "modo_trabajo", "contexto_proyecto", "global"],
+                    "description": "Solo si el usuario fue explicito sobre el tipo.",
+                },
+                "espacio_override": {
+                    "type": "string",
+                    "description": "Solo si el usuario fue explicito sobre el espacio.",
+                },
+            },
+            "required": ["texto"],
+        },
+    },
 ]
 
 
@@ -213,6 +244,26 @@ def execute_tool(name: str, args: dict) -> str:
             limit=int(args.get("limit", 10)),
         )
         return json.dumps([_serialize_memory(m) for m in memories])
+
+    if name == "save_memory":
+        try:
+            memory_id, structured = pipeline.process(
+                args["texto"],
+                tipo_override=args.get("tipo_override"),
+                espacio_override=args.get("espacio_override"),
+            )
+        except (EmbeddingUnavailable, StructuringError) as exc:
+            return json.dumps({"error": "recoverable", "message": str(exc)})
+        except pipeline.PipelineError as exc:
+            return json.dumps({"error": "invalid_args", "message": str(exc)})
+        return json.dumps({
+            "saved": True,
+            "id": str(memory_id),
+            "tipo": structured.tipo,
+            "space_id": structured.space_id,
+            "proyecto": structured.proyecto,
+            "tags": structured.tags,
+        })
 
     return json.dumps({"error": "unknown_tool", "name": name})
 
