@@ -33,7 +33,9 @@ def test_tool_list_spaces_returns_active_only() -> None:
     raw = agent.execute_tool("list_spaces", {})
     data = json.loads(raw)
     ids = {s["id"] for s in data}
-    assert {"global", "whitebay", "simplistic"} <= ids
+    # `global` es el unico seed garantizado. El test no asume los espacios extra
+    # que cada usuario crea.
+    assert "global" in ids
 
 
 def test_tool_create_space(test_space: str) -> None:
@@ -195,6 +197,6 @@ def test_reset_clears_history() -> None:
 def test_agent_real_call_lists_spaces() -> None:
     a = agent.Agent()
     reply = a.chat("listame mis espacios activos sin ningun extra, en una linea cada uno")
+    # `global` es el unico espacio garantizado. La respuesta debe incluirlo;
+    # el resto depende de los espacios que tenga cada instalacion.
     assert "global" in reply.lower()
-    assert "whitebay" in reply.lower()
-    assert "simplistic" in reply.lower()

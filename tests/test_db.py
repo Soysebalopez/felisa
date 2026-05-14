@@ -33,7 +33,9 @@ def created_ids() -> Iterator[list[uuid.UUID]]:
 def test_list_spaces_returns_seeds() -> None:
     spaces = db.list_spaces()
     ids = {s.id for s in spaces}
-    assert {"global", "whitebay", "simplistic"} <= ids
+    # `global` es el unico espacio que el seed inicial garantiza (sql/001_init.sql).
+    # Si el usuario agrego mas espacios (via installer o agente), tambien aparecen.
+    assert "global" in ids
     global_space = next(s for s in spaces if s.id == "global")
     assert global_space.es_global is True
 
@@ -83,7 +85,7 @@ def test_filter_by_tipo(created_ids: list[uuid.UUID]) -> None:
     mid = db.insert_memory(
         contenido="patron de prueba",
         tipo="patron",
-        space_id="whitebay",
+        space_id="global",
         tags=[CLEANUP_TAG, "test-filter"],
         embedding=_random_embedding(seed=99),
     )
