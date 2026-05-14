@@ -41,7 +41,8 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, Response
 from starlette.routing import Mount
 
-from felisa.core import db, embeddings
+from felisa.core import db, embeddings, pipeline
+from felisa.core.structuring import StructuringError
 from felisa.mcp.oauth_provider import MCP_SCOPE, FelisaOAuthProvider
 
 log = logging.getLogger("felisa.mcp")
@@ -89,11 +90,13 @@ oauth_provider = FelisaOAuthProvider(
 mcp = FastMCP(
     "Felisa",
     instructions=(
-        "Memoria persistente de Seba (Sebastian Lopez). Tools read-only para "
-        "consultar decisiones tecnicas, patrones, modos de trabajo, contexto de "
-        "proyectos. Usar `search_memories` cuando el usuario habla de un tema, "
-        "`list_spaces` para conocer los espacios disponibles, "
-        "`list_recent_memories` para contexto reciente."
+        "Memoria persistente de Seba (Sebastian Lopez). Tools de lectura: "
+        "`search_memories` cuando el usuario habla de un tema, `list_spaces` "
+        "para conocer los espacios disponibles, `list_recent_memories` para "
+        "contexto reciente, `count_memories` para totales. Tool de escritura: "
+        "`create_memory` para guardar una decision, patron, contexto o modo de "
+        "trabajo que el usuario quiere recordar — usala solo cuando el usuario "
+        "lo pida explicitamente (\"recorda esto\", \"guarda que\", \"anota\")."
     ),
     stateless_http=True,
     json_response=True,
@@ -188,6 +191,48 @@ def count_memories(space: str | None = None) -> dict[str, Any]:
     if space:
         return {"space": space, "count": db.count_memories_in_space(space)}
     return {"total": db.count_memories_total()}
+
+
+@mcp.tool()
+def create_memory(
+    contenido: str,
+    space: str | None = None,
+    tipo: str | None = None,
+) -> dict[str, Any]:
+    """Guarda una memoria nueva: la estructura con Haiku, embebe e inserta.
+
+    Usar solo cuando el usuario pide explicitamente recordar algo. Haiku
+    clasifica tipo/espacio/tags automaticamente; `space` y `tipo` son
+    overrides opcionales si el usuario los fija a mano.
+
+    Args:
+        contenido: texto de la memoria (lo que el usuario quiere recordar)
+        space: forzar espacio (whitebay, simplistic, global, ...). None = autodetect.
+        tipo: forzar tipo (decision_tecnica, patron, framework, modo_trabajo, contexto_proyecto, global). None = autodetect.
+    """
+    contenido = (contenido or "").strip()
+    if not contenido:
+        return {"error": "contenido_vacio", "message": "contenido no puede estar vacio"}
+    try:
+        memory_id, structured = pipeline.process(
+            contenido, tipo_override=tipo, espacio_override=space,
+        )
+    except embeddings.EmbeddingUnavailable as exc:
+        return {"error": "embeddings_unavailable", "message": str(exc)}
+    except StructuringError as exc:
+        return {"error": "structuring_failed", "message": str(exc)}
+    except pipeline.PipelineError as exc:
+        return {"error": "pipeline_error", "message": str(exc)}
+    if memory_id is None:
+        return {"error": "skipped", "message": "memoria descartada (sin-clasificar)"}
+    return {
+        "id": str(memory_id),
+        "tipo": structured.tipo,
+        "space_id": structured.space_id,
+        "proyecto": structured.proyecto,
+        "tags": list(structured.tags),
+        "contenido_estructurado": structured.contenido_estructurado,
+    }
 
 
 @mcp.custom_route("/health", methods=["GET"])
