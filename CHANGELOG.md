@@ -5,6 +5,8 @@ versioning en [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-05-15
+
 ### Added
 - **Fase 6 — Hook de captura automatica (Claude Code)**: hook `SessionEnd` que
   analiza el transcript de cada sesion con Haiku y propone memorias para
